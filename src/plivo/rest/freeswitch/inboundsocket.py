@@ -582,6 +582,7 @@ class RESTInboundSocket(InboundEventSocket):
                 params['ScheduledHangupId'] = sched_hangup_id
         # if hangup url, handle http request
         if hangup_url:
+            #self.api("log notice %s" % str(event))
             sip_uri = event['variable_plivo_sip_transfer_uri'] or ''
             if sip_uri:
                 params['SIPTransfer'] = 'true'
@@ -592,6 +593,7 @@ class RESTInboundSocket(InboundEventSocket):
             params['From'] = caller_num or ''
             params['Direction'] = direction or ''
             params['CallStatus'] = 'completed'
+            params['Duration'] = event["variable_duration"]
             spawn_raw(self.send_to_url, hangup_url, params)
 
     def send_to_url(self, url=None, params={}, method=None):
@@ -961,6 +963,8 @@ class RESTInboundSocket(InboundEventSocket):
         # case no schedule
         if schedule <= 0:
             for cmd in cmds:
+                self.log.info("%s" % (cmd))
+                self.api("log notice %s" % (cmd))
                 res = self.api(cmd)
                 if not res.is_success():
                     self.log.error("%s Failed '%s' -- %s" % (name, cmd, res.get_response()))

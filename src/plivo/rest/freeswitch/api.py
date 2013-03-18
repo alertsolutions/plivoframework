@@ -6,6 +6,7 @@ import re
 import uuid
 import os
 import os.path
+import errno
 from datetime import datetime
 try:
     import xml.etree.cElementTree as etree
@@ -2288,3 +2289,72 @@ class PlivoRestApi(object):
         result = True
         return self.send_response(Success=result, Message=msg)
 
+    @auth_protect
+    def save_wav(self):
+        # todo: application/octet-stream instead of application/x-www-form-urlencoded
+        self._rest_inbound_socket.log.debug("RESTAPI SaveWav called")
+        result = False
+        name = get_post_param(request, "WavName") 
+        content = get_post_param(request, "WavContent") 
+
+        if not name:
+            msg = "WavName parameter missing"
+            return self.send_response(Success=result, Message=msg)
+
+        if not content:
+            msg = "WavContent parameter missing"
+            return self.send_response(Success=result, Message=msg)
+
+        pathname = os.path.dirname(name)
+        self._rest_inbound_socket.log.debug("saving %s to disk in folder %s" % (name, pathname))
+        try:
+            self._mkdir_p(pathname)
+            with open(name, 'wb') as nf:
+                nf.write(base64.decodestring(content))
+        except Exception as ex:
+            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (name, str(ex)))
+            msg = "failed to save %s" % name
+            return self.send_response(Success=result, Message=msg)
+
+        if not self._check_for_wav(name):
+            msg = "WAV %s is invalid or does not exist" % name
+            return self.send_response(Success=result, Message=msg)
+
+        result = True
+        msg = "WAV saved to %s" % name
+        return self.send_response(Success=result, Message=msg, Name=name)
+
+    @auth_protect
+    def check_wav(self):
+        self._rest_inbound_socket.log.debug("RESTAPI CheckWav called")
+        result = False
+        name = get_post_param(request, "WavName") 
+
+        if not name:
+            msg = "WavName parameter missing"
+            return self.send_response(Success=result, Message=msg)
+
+        if not self._check_for_wav(name):
+            msg = "WAV %s is invalid or does not exist" % name
+            return self.send_response(Success=result, Message=msg)
+
+        result = True
+        msg = "WAV %s exists" % name
+        return self.send_response(Success=result, Message=msg, Name=name)
+
+    def _check_for_wav(self, name):
+        if not name.endswith(".wav"): return False
+
+        try:
+            with open(name) as f: pass
+            return True
+        except IOError as e:
+            self._rest_inbound_socket.log.debug("could not find %s: %s" % (name, str(e)))
+            return False
+
+    def _mkdir_p(self, path):
+        try:
+            os.makedirs(path)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST and os.path.isdir(path): pass
+            else: raise
