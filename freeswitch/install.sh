@@ -10,7 +10,7 @@ FS_GIT_REPO=git://git.freeswitch.org/freeswitch.git
 FS_INSTALLED_PATH=/usr/local/freeswitch
 
 #####################################################
-FS_BASE_PATH=/usr/src/
+FS_BASE_PATH=/usr/local/src/
 #####################################################
 
 CURRENT_PATH=$PWD
@@ -136,6 +136,10 @@ cd $FS_INSTALLED_PATH/conf/autoload_configs/
 wget --no-check-certificate $FS_CONF_PATH/conf/conference.conf.xml -O conference.conf.xml
 
 cd $CURRENT_PATH
+
+ln -s "$FS_INSTALLED_PATH/conf" "/etc/freeswitch"
+ln -s "$FS_INSTALLED_PATH/log" "/var/log/freeswitch"
+ln -s "$FS_INSTALLED_PATH/run" "/var/run/freeswitch"
 
 # Install Complete
 #clear
