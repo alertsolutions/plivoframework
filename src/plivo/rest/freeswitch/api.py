@@ -2019,6 +2019,66 @@ class PlivoRestApi(object):
         return self.send_response(Success=result, Message=msg)
 
     @auth_protect
+    def broadcast(self):
+        """Play something to a Call or bridged leg or both legs.
+        Allow playing a sound to a Call via the REST API. To play sound,
+        make an HTTP POST request to the resource URI.
+
+        POST Parameters
+        ----------------
+
+        Required Parameters - You must POST the following parameters:
+
+        CallUUID: Unique Call ID to which the action should occur to.
+
+        Sounds: Comma separated list of sound files to play.
+
+        Optional Parameters:
+
+        [Legs]: 'aleg'|'bleg'|'both'. On which leg(s) to play something.
+                'aleg' means only play on the Call.
+                'bleg' means only play on the bridged leg of the Call.
+                'both' means play on the Call and the bridged leg of the Call.
+                Default is 'aleg' .
+
+        [Delimiter]: The delimiter used in the sounds list (default: ',')
+
+        """
+        self._rest_inbound_socket.log.debug("RESTAPI Broadcast with %s" \
+                                        % str(request.form.items()))
+        msg = ""
+        result = False
+
+        calluuid = get_post_param(request, 'CallUUID')
+        sounds = get_post_param(request, 'Sounds')
+        legs = get_post_param(request, 'Legs')
+        delimiter = get_post_param(request, 'Delimiter')
+        
+        if not calluuid:
+            msg = "CallUUID Parameter Missing"
+            return self.send_response(Success=result, Message=msg)
+        if not sounds:
+            msg = "Sounds Parameter Missing"
+            return self.send_response(Success=result, Message=msg)
+        if not legs:
+            legs = 'aleg'
+
+        if not delimiter: delimiter = ','
+        
+        sounds_list = sounds.split(delimiter)
+        if not sounds_list:
+            msg = "Sounds Parameter is Invalid"
+            return self.send_response(Success=result, Message=msg)
+
+        # now do the job !
+        if self._rest_inbound_socket.broadcast_on_call(calluuid, sounds_list, legs):
+            msg = "Broadcast Request Executed"
+            result = True
+            return self.send_response(Success=result, Message=msg)
+        msg = "Broadcast Request Failed"
+        return self.send_response(Success=result, Message=msg)
+
+    @auth_protect
     def sound_touch(self):
         """Add audio effects on a Call
 
@@ -2207,8 +2267,8 @@ class PlivoRestApi(object):
             return self.send_response(Success=result, Message=msg)
 
         leg = get_post_param(request, 'Leg')
-        if not leg:
-            leg = 'aleg'
+        if not leg: leg = 'aleg'
+
         if leg == 'aleg':
             cmd = "uuid_send_dtmf %s %s" % (calluuid, digits)
         elif leg == 'bleg':

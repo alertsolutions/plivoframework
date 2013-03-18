@@ -52,6 +52,8 @@ URLS = {
         '/' + PLIVO_VERSION + '/SchedulePlay/': (PlivoRestApi.schedule_play, ['POST']),
         # API to cancel a scheduled play on a single call
         '/' + PLIVO_VERSION + '/CancelScheduledPlay/': (PlivoRestApi.cancel_scheduled_play, ['POST']),
+        # API to play a broadcast on a single call
+        '/' + PLIVO_VERSION + '/Broadcast/': (PlivoRestApi.broadcast, ['POST']),
         # API to add soundtouch audio effects to a call
         '/' + PLIVO_VERSION + '/SoundTouch/': (PlivoRestApi.sound_touch, ['POST']),
         # API to remove soundtouch audio effects on a call

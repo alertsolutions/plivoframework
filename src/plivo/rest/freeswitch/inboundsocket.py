@@ -1008,6 +1008,84 @@ class RESTInboundSocket(InboundEventSocket):
             return False
         return True
 
+    def broadcast_on_call(self, call_uuid="", sounds_list=[], legs="aleg"):
+        cmds = []
+        error_count = 0
+        bleg = None
+
+        name = "Call Broadcast"
+        if not call_uuid:
+            self.log.error("%s Failed -- Missing CallUUID" % name)
+            return False
+        if not sounds_list:
+            self.log.error("%s Failed -- Missing Sounds" % name)
+            return False
+        if not legs in ('aleg', 'bleg', 'both'):
+            self.log.error("%s Failed -- Invalid legs arg '%s'" % (name, str(legs)))
+            return False
+
+        # get sound files
+        sounds_to_play = []
+        for sound in sounds_list:
+            if is_valid_sound_proto(sound):
+                sounds_to_play.append(sound)
+            elif not is_valid_url(sound):
+                if file_exists(sound):
+                    sounds_to_play.append(sound)
+                else:
+                    self.log.warn("%s -- File %s not found" % (name, sound))
+            else:
+                url = normalize_url_space(sound)
+                sound_file_path = get_resource(self, url)
+                if sound_file_path:
+                    sounds_to_play.append(sound_file_path)
+                else:
+                    self.log.warn("%s -- Url %s not found" % (name, url))
+        if not sounds_to_play:
+            self.log.error("%s Failed -- Sound files not found" % name)
+            return False
+
+        # build command
+        play_str = '!'.join(sounds_to_play)
+        play_aleg = 'file_string://%s' % play_str
+        play_bleg = 'file_string://silence_stream://1!%s' % play_str
+
+        cmd = "uuid_broadcast %s %s %s" % (call_uuid, play_aleg if legs == 'aleg' else play_bleg, legs)
+        # aleg case
+        if legs == 'aleg':
+            cmds.append("uuid_broadcast %s %s aleg" % (call_uuid, play_aleg))
+        # bleg case
+        elif legs  == 'bleg':
+            # get bleg
+            bleg = self.get_var("bridge_uuid", uuid=call_uuid)
+            # add broadcast command
+            if bleg:
+                cmds.append("uuid_broadcast %s %s bleg" % (call_uuid, play_bleg))
+            else:
+                self.log.error("%s Failed -- No BLeg found" % name)
+                return False
+        # both legs case
+        elif legs == 'both':
+            # add broadcast command
+            cmds.append("uuid_broadcast %s %s" % (call_uuid))
+            # get the bleg
+            if not self.get_var("bridge_uuid", uuid=call_uuid):
+                self.log.warn("%s -- No BLeg found" % name)
+        else:
+            self.log.error("%s Failed -- Invalid Legs '%s'" % (name, legs))
+            return False
+
+        for cmd in cmds:
+            self.log.info("%s" % (cmd))
+            self.api("log notice %s" % (cmd))
+            res = self.api(cmd)
+            if not res.is_success():
+                self.log.error("%s Failed '%s' -- %s" % (name, cmd, res.get_response()))
+                error_count += 1
+        if error_count > 0:
+            return False
+        return True
+
     def _get_displace_media_list(self, uuid=''):
         if not uuid:
             return []
@@ -1057,7 +1135,3 @@ class RESTInboundSocket(InboundEventSocket):
             return True
         self.log.error("SoundTouch Failed '%s' -- %s" % (cmd, res.get_response()))
         return False
-
-
-
-
