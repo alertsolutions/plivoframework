@@ -376,12 +376,13 @@ class RESTInboundSocket(InboundEventSocket):
             if hangup_cause == 'LOSE_RACE':
                 return
             bleg_uuid = event['Unique-ID']
-            
+            duration = event['variable_duration']
             params = {'DialBLegUUID': bleg_uuid,
                       'DialALegUUID': aleg_uuid,
                       'DialBLegStatus': 'hangup',
                       'DialBLegHangupCause': hangup_cause,
-                      'CallUUID': aleg_uuid
+                      'CallUUID': aleg_uuid,
+                      'Duration': duration
                      }
             # add extra params
             extra_params = self.get_extra_fs_vars(event)

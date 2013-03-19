@@ -663,6 +663,15 @@ class Dial(Element):
         sound_files = []
         if not remote_url:
             return sound_files
+
+        if not is_valid_url("http"):
+            outbound_socket.log.info('Assuming %s is a file' % remote_url)
+            if file_exists(remote_url):
+                sound_files.append(remote_url)
+            else:
+                outbound_socket.log.info('%s does not exist' % remote_url)
+            return sound_files
+
         outbound_socket.log.info('Fetching remote sound from restxml %s' % remote_url)
         try:
             response = outbound_socket.send_to_url(remote_url, params={}, method='POST')
@@ -860,8 +869,8 @@ class Dial(Element):
         # Append time limit and group confirm to dial string
         self.dial_str = '<%s,%s%s>%s' % (ring_flag, dial_time_limit, dial_confirm, self.dial_str)
         # Ugly hack to force use of enterprise originate because simple originate lacks speak support in ringback
-        if len(numbers) < 2:
-            self.dial_str += ':_:'
+        # TODO: this hack breaks bridge for some reason, revisit when we implement speak, I guess
+        # if len(numbers) < 2: self.dial_str += ':_:'
 
         # Set hangup on '*' or unset if not provided
         if self.hangup_on_star:
@@ -901,6 +910,7 @@ class Dial(Element):
             # send ring ready to originator
             outbound_socket.ring_ready()
             # execute bridge
+            # outbound_socket.api("log notice bridge %s" % self.dial_str)
             outbound_socket.bridge(self.dial_str, lock=False)
 
             # set bind digit actions
