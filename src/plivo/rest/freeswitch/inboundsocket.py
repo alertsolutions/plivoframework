@@ -377,12 +377,16 @@ class RESTInboundSocket(InboundEventSocket):
                 return
             bleg_uuid = event['Unique-ID']
             duration = event['variable_duration']
-            params = {'DialBLegUUID': bleg_uuid,
+            sip_code = event["variable_sip_term_status"]
+            params = {
+                      'DialBLegUUID': bleg_uuid,
                       'DialALegUUID': aleg_uuid,
                       'DialBLegStatus': 'hangup',
                       'DialBLegHangupCause': hangup_cause,
                       'CallUUID': aleg_uuid,
-                      'Duration': duration
+                      'Duration': duration,
+                      'SIPCode': sip_code,
+                      'OriginationUUID': origination_uuid
                      }
             # add extra params
             extra_params = self.get_extra_fs_vars(event)
@@ -595,6 +599,8 @@ class RESTInboundSocket(InboundEventSocket):
             params['Direction'] = direction or ''
             params['CallStatus'] = 'completed'
             params['Duration'] = event["variable_duration"]
+            params['SIPCode'] = event["variable_sip_term_status"]
+            params['OriginationUUID'] = event['variable_origination_uuid']
             spawn_raw(self.send_to_url, hangup_url, params)
 
     def send_to_url(self, url=None, params={}, method=None):
