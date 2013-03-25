@@ -19,6 +19,7 @@ from flask import request
 from werkzeug.exceptions import Unauthorized
 import gevent.queue
 
+from plivo.utils.files import check_for_wav, mkdir_p
 from plivo.rest.freeswitch.helpers import is_valid_url, get_conf_value, \
                                             get_post_param, get_resource, \
                                             normalize_url_space, \
@@ -2308,7 +2309,7 @@ class PlivoRestApi(object):
         pathname = os.path.dirname(name)
         self._rest_inbound_socket.log.debug("saving %s to disk in folder %s" % (name, pathname))
         try:
-            self._mkdir_p(pathname)
+            mkdir_p(pathname)
             with open(name, 'wb') as nf:
                 nf.write(base64.decodestring(content))
         except Exception as ex:
@@ -2316,7 +2317,7 @@ class PlivoRestApi(object):
             msg = "failed to save %s" % name
             return self.send_response(Success=result, Message=msg)
 
-        if not self._check_for_wav(name):
+        if not check_for_wav(name):
             msg = "WAV %s is invalid or does not exist" % name
             return self.send_response(Success=result, Message=msg)
 
@@ -2334,27 +2335,10 @@ class PlivoRestApi(object):
             msg = "WavName parameter missing"
             return self.send_response(Success=result, Message=msg)
 
-        if not self._check_for_wav(name):
+        if not check_for_wav(name):
             msg = "WAV %s is invalid or does not exist" % name
             return self.send_response(Success=result, Message=msg)
 
         result = True
         msg = "WAV %s exists" % name
         return self.send_response(Success=result, Message=msg, Name=name)
-
-    def _check_for_wav(self, name):
-        if not name.endswith(".wav"): return False
-
-        try:
-            with open(name) as f: pass
-            return True
-        except IOError as e:
-            self._rest_inbound_socket.log.debug("could not find %s: %s" % (name, str(e)))
-            return False
-
-    def _mkdir_p(self, path):
-        try:
-            os.makedirs(path)
-        except OSError as exc:
-            if exc.errno == errno.EEXIST and os.path.isdir(path): pass
-            else: raise

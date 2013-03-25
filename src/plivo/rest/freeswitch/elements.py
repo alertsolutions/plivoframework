@@ -15,6 +15,7 @@ except ImportError:
 import gevent
 from gevent import spawn_raw
 
+from plivo.utils.files import mkdir_p
 from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         file_exists, normalize_url_space, \
                                         get_resource, get_grammar_resource, \
@@ -129,6 +130,12 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'engine': 'flite',
                 'method': '',
                 'type': ''
+        },
+        'SayDigits': {
+                'language': 'en',
+                'loop': 1,
+                'method': 'ITERATED',
+                'type': 'NUMBER'
         },
         'GetSpeech': {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
@@ -1447,6 +1454,7 @@ class Record(Element):
         else:
             filename = "%s_%s" % (datetime.now().strftime("%Y%m%d-%H%M%S"),
                                 outbound_socket.get_channel_unique_id())
+        mkdir_p(self.file_path)
         record_file = "%s%s.%s" % (self.file_path, filename, self.file_format)
 
         if self.both_legs:
@@ -1619,6 +1627,53 @@ class Notify(Element):
             self.log.error("Sending to %s %s with %s -- Error: %s" \
                                         % (self.method, self.url, params, e))
         return None
+
+class SayDigits(Element):
+    """Say a string of digits
+
+    text: text to say
+    language: language to use
+
+    method: PRONOUNCED, ITERATED, COUNTED
+    """
+    valid_methods = ('PRONOUNCED', 'ITERATED', 'COUNTED')
+
+    def __init__(self):
+        Element.__init__(self)
+        self.loop_times = 1
+        self.language = "en"
+        self.item_type = "NUMBER"
+        self.method = "ITERATED"
+
+    def parse_element(self, element, uri=None):
+        Element.parse_element(self, element, uri)
+        # Extract Loop attribute
+        self.language = self.extract_attribute_value("language")
+        method = self.extract_attribute_value("method")
+        if method in self.valid_methods:
+            self.method = method
+        if not self.text.isdigit():
+            raise RESTFormatException("SayDigits 'text' must be a number")
+
+    def execute(self, outbound_socket):
+        say_args = "%s %s %s %s" % (self.language, self.item_type, self.method, self.text)
+        res = outbound_socket.say(say_args, loops=self.loop_times)
+        if res.is_success():
+            for i in range(self.loop_times):
+                outbound_socket.log.debug("Speaking %d times ..." % (i+1))
+                event = outbound_socket.wait_for_action()
+                if event.is_empty():
+                    outbound_socket.log.warn("SayDigits Break (empty event)")
+                    return
+                outbound_socket.log.debug("SayDigits %d times done (%s)" \
+                            % ((i+1), str(event['Application-Response'])))
+                gevent.sleep(0.01)
+            outbound_socket.log.info("SayDigits Finished")
+            return
+        else:
+            outbound_socket.log.error("SayDigits Failed - %s" \
+                            % str(res.get_response()))
+            return
 
 class Speak(Element):
     """Speak text
