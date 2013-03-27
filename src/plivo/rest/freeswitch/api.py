@@ -21,7 +21,7 @@ import gevent.queue
 
 from plivo.utils.files import check_for_wav, mkdir_p
 from plivo.rest.freeswitch.helpers import is_valid_url, get_conf_value, \
-                                            get_post_param, get_resource, \
+                                            get_post_param, get_http_param, get_resource, \
                                             normalize_url_space, \
                                             HTTPRequest
 import plivo.rest.freeswitch.elements as elements
@@ -2331,6 +2331,7 @@ class PlivoRestApi(object):
         result = False
         name = get_post_param(request, "WavName") 
 
+        if not name: name = get_http_param(request, "WavName")
         if not name:
             msg = "WavName parameter missing"
             return self.send_response(Success=result, Message=msg)
@@ -2342,3 +2343,22 @@ class PlivoRestApi(object):
         result = True
         msg = "WAV %s exists" % name
         return self.send_response(Success=result, Message=msg, Name=name)
+
+    @auth_protect
+    def get_wav(self):
+        self._rest_inbound_socket.log.debug("RESTAPI GetWav called")
+        result = False
+        name = get_post_param(request, "WavName") 
+
+        if not name: name = get_http_param(request, "WavName")
+        if not name:
+            msg = "WavName parameter missing"
+            return self.send_response(Success=result, Message=msg)
+
+        if not check_for_wav(name):
+            msg = "WAV %s is invalid or does not exist" % name
+            return self.send_response(Success=result, Message=msg)
+
+        result = True
+        msg = "WAV %s exists" % name
+        return flask.send_file(name)

@@ -85,7 +85,9 @@ URLS = {
         # API to list all conferences with members
         '/' + PLIVO_VERSION + '/ConferenceList/': (PlivoRestApi.conference_list, ['POST']),
         # API to check for a WAV file
-        '/' + PLIVO_VERSION + '/CheckWav/': (PlivoRestApi.check_wav, ['POST']),
+        '/' + PLIVO_VERSION + '/CheckWav/': (PlivoRestApi.check_wav, ['POST', 'GET']),
         # API to save a WAV file
         '/' + PLIVO_VERSION + '/SaveWav/': (PlivoRestApi.save_wav, ['POST']),
+        # API to download a WAV file
+        '/' + PLIVO_VERSION + '/GetWav/': (PlivoRestApi.get_wav, ['POST', 'GET']),
        }
