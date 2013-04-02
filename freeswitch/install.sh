@@ -137,9 +137,9 @@ wget --no-check-certificate $FS_CONF_PATH/conf/conference.conf.xml -O conference
 
 cd $CURRENT_PATH
 
-ln -s "$FS_INSTALLED_PATH/conf" "/etc/freeswitch"
-ln -s "$FS_INSTALLED_PATH/log" "/var/log/freeswitch"
-ln -s "$FS_INSTALLED_PATH/run" "/var/run/freeswitch"
+[ ! -h /etc/freeswitch ] && ln -s "$FS_INSTALLED_PATH/conf" /etc/freeswitch
+[ ! -h /var/log/freeswitch ] && ln -s "$FS_INSTALLED_PATH/log" /var/log/freeswitch
+[ ! -h /var/run/freeswitch ] && ln -s "$FS_INSTALLED_PATH/run" /var/run/freeswitch
 
 # Install Complete
 #clear
