@@ -2292,32 +2292,36 @@ class PlivoRestApi(object):
 
     @auth_protect
     def save_wav(self):
-        # todo: application/octet-stream instead of application/x-www-form-urlencoded
         self._rest_inbound_socket.log.debug("RESTAPI SaveWav called")
         result = False
-        name = get_post_param(request, "WavName") 
-        content = get_post_param(request, "WavContent") 
+        name = get_post_param(request, "WavPath") 
+        file = request.files['file']
 
         if not name:
-            msg = "WavName parameter missing"
+            msg = "WavPath parameter missing"
             return self.send_response(Success=result, Message=msg)
 
-        if not content:
-            msg = "WavContent parameter missing"
+        if not file:
+            msg = "no file uploaded"
             return self.send_response(Success=result, Message=msg)
+        
+        self._rest_inbound_socket.log.debug(str(file))
 
-        pathname = os.path.dirname(name)
-        self._rest_inbound_socket.log.debug("saving %s to disk in folder %s" % (name, pathname))
+        dir_name = os.path.dirname(name)
+        if os.path.isabs(dir_name) : dir_name = dir_name.lstrip('/')
+        pathname = os.path.join(self.save_dir, dir_name)
+        filename = os.path.basename(name)
+        fullpath = os.path.join(pathname, filename)
+        self._rest_inbound_socket.log.debug("saving %s to disk in folder %s" % (filename, pathname))
         try:
             mkdir_p(pathname)
-            with open(name, 'wb') as nf:
-                nf.write(base64.decodestring(content))
+            file.save(fullpath)
         except Exception as ex:
-            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (name, str(ex)))
+            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (filename, str(ex)))
             msg = "failed to save %s" % name
             return self.send_response(Success=result, Message=msg)
 
-        if not check_for_wav(name):
+        if not check_for_wav(fullpath):
             msg = "WAV %s is invalid or does not exist" % name
             return self.send_response(Success=result, Message=msg)
 
@@ -2336,7 +2340,12 @@ class PlivoRestApi(object):
             msg = "WavName parameter missing"
             return self.send_response(Success=result, Message=msg)
 
-        if not check_for_wav(name):
+        dir_name = os.path.dirname(name)
+        if os.path.isabs(dir_name) : dir_name = dir_name.lstrip('/')
+        pathname = os.path.join(self.save_dir, dir_name)
+        filename = os.path.basename(name)
+        fullpath = os.path.join(pathname, filename)
+        if not check_for_wav(fullpath):
             msg = "WAV %s is invalid or does not exist" % name
             return self.send_response(Success=result, Message=msg)
 
