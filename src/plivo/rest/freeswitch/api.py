@@ -19,7 +19,7 @@ from flask import request
 from werkzeug.exceptions import Unauthorized
 import gevent.queue
 
-from plivo.utils.files import check_for_wav, mkdir_p
+from plivo.utils.files import check_for_wav, mkdir_p, re_root
 from plivo.rest.freeswitch.helpers import is_valid_url, get_conf_value, \
                                             get_post_param, get_http_param, get_resource, \
                                             normalize_url_space, \
@@ -2307,17 +2307,14 @@ class PlivoRestApi(object):
         
         self._rest_inbound_socket.log.debug(str(file))
 
-        dir_name = os.path.dirname(name)
-        if os.path.isabs(dir_name) : dir_name = dir_name.lstrip('/')
-        pathname = os.path.join(self.save_dir, dir_name)
-        filename = os.path.basename(name)
-        fullpath = os.path.join(pathname, filename)
-        self._rest_inbound_socket.log.debug("saving %s to disk in folder %s" % (filename, pathname))
+        fullpath = re_root(name, self.save_dir)
+        pathname = os.path.dirname(fullpath)
+        self._rest_inbound_socket.log.debug("saving %s to disk" % fullpath)
         try:
             mkdir_p(pathname)
             file.save(fullpath)
         except Exception as ex:
-            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (filename, str(ex)))
+            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (fullpath, str(ex)))
             msg = "failed to save %s" % name
             return self.send_response(Success=result, Message=msg)
 
@@ -2340,11 +2337,7 @@ class PlivoRestApi(object):
             msg = "WavName parameter missing"
             return self.send_response(Success=result, Message=msg)
 
-        dir_name = os.path.dirname(name)
-        if os.path.isabs(dir_name) : dir_name = dir_name.lstrip('/')
-        pathname = os.path.join(self.save_dir, dir_name)
-        filename = os.path.basename(name)
-        fullpath = os.path.join(pathname, filename)
+        fullpath = re_root(name, self.save_dir)
         if not check_for_wav(fullpath):
             msg = "WAV %s is invalid or does not exist" % name
             return self.send_response(Success=result, Message=msg)

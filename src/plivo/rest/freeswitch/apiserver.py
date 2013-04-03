@@ -169,7 +169,7 @@ class PlivoRestServer(PlivoRestApi):
                 self.app.secret_key = config.get('rest_server', 'SECRET_KEY')
                 self.app.config['MAX_CONTENT_LENGTH'] = \
                     config.get('rest_server', 'MAX_UPLOAD_SIZE', default=5) * 1024 * 1024
-                self.save_dir = config.get('rest_server', 'UPLOAD_FOLDER', default='/tmp')
+                self.save_dir = config.get('common', 'UPLOAD_FOLDER', default='/tmp')
                 self.log.info("save_dir: %s" % self.save_dir)
                 self.app.config['UPLOAD_FOLDER'] = self.save_dir
                 self.http_address = config.get('rest_server', 'HTTP_ADDRESS')
