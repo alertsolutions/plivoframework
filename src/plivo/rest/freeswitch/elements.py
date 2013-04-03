@@ -15,7 +15,7 @@ except ImportError:
 import gevent
 from gevent import spawn_raw
 
-from plivo.utils.files import mkdir_p
+from plivo.utils.files import mkdir_p, re_root
 from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         file_exists, normalize_url_space, \
                                         get_resource, get_grammar_resource, \
@@ -384,7 +384,7 @@ class Conference(Element):
                             loop = MAX_LOOPS  # Add a high number to Play infinitely
                         # Play the file loop number of times
                         for i in range(loop):
-                            sound_files.append(sound_file)
+                            sound_files.append(re_root(sound_file, outbound_socket.save_dir))
                         # Infinite Loop, so ignore other children
                         if loop == MAX_LOOPS:
                             break
@@ -674,7 +674,7 @@ class Dial(Element):
         if not is_valid_url("http"):
             outbound_socket.log.info('Assuming %s is a file' % remote_url)
             if file_exists(remote_url):
-                sound_files.append(remote_url)
+                sound_files.append(re_root(remote_url, outbound_socket.save_dir))
             else:
                 outbound_socket.log.info('%s does not exist' % remote_url)
             return sound_files
@@ -702,7 +702,7 @@ class Dial(Element):
                             loop = MAX_LOOPS  # Add a high number to Play infinitely
                         # Play the file loop number of times
                         for i in range(loop):
-                            sound_files.append(sound_file)
+                            sound_files.append(re_root(sound_file, outbound_socket.save_dir))
                         # Infinite Loop, so ignore other children
                         if loop == MAX_LOOPS:
                             break
@@ -1082,7 +1082,7 @@ class GetDigits(Element):
                         loop = MAX_LOOPS  # Add a high number to Play infinitely
                     # Play the file loop number of times
                     for i in range(loop):
-                        self.sound_files.append(sound_file)
+                        self.sound_files.append(re_root(sound_file, outbound_socket.save_dir))
                     # Infinite Loop, so ignore other children
                     if loop == MAX_LOOPS:
                         break
@@ -1320,6 +1320,8 @@ class Play(Element):
         if not self.sound_file_path:
             url = normalize_url_space(self.temp_audio_path)
             self.sound_file_path = get_resource(outbound_socket, url)
+        else:
+            self.sound_file_path = re_root(self.sound_file_path, outbound_socket.save_dir)
 
     def execute(self, outbound_socket):
         if self.sound_file_path:
@@ -1874,7 +1876,7 @@ class GetSpeech(Element):
                             loop = MAX_LOOPS  # Add a high number to Play infinitely
                         # Play the file loop number of times
                         for i in range(loop):
-                            self.sound_files.append(sound_file)
+                            self.sound_files.append(re_root(sound_file, outbound_socket.save_dir))
                         # Infinite Loop, so ignore other children
                         if loop == MAX_LOOPS:
                             break

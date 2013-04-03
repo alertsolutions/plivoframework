@@ -85,7 +85,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
                          )
 
     def __init__(self, socket, address,
-                 log, cache,
+                 log, cache, save_dir,
                  default_answer_url=None,
                  default_hangup_url=None,
                  default_http_method='POST',
@@ -128,6 +128,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         # set answered flag
         self.answered = False
         self.cache = cache
+        self.save_dir = save_dir
         # inherits from outboundsocket
         OutboundEventSocket.__init__(self, socket, address, filter=None,
                                      eventjson=True, pool_size=200, trace=trace)

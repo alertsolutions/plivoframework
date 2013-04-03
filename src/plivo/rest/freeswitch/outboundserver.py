@@ -75,6 +75,7 @@ class PlivoOutboundServer(outboundsocket.OutboundServer):
             self.default_hangup_url = config.get('common', 'DEFAULT_HANGUP_URL', default='')
 
             self.default_http_method = config.get('common', 'DEFAULT_HTTP_METHOD', default='')
+            self.save_dir = config.get('common', 'UPLOAD_FOLDER', default='/tmp')
             if not self.default_http_method in ('GET', 'POST'):
                 self.default_http_method = 'POST'
 
@@ -125,7 +126,7 @@ class PlivoOutboundServer(outboundsocket.OutboundServer):
     def handle_request(self, socket, address):
         request_id = self._get_request_id()
         self.log.info("(%d) New request from %s" % (request_id, str(address)))
-        req = self._requestClass(socket, address, self.log, self.cache,
+        req = self._requestClass(socket, address, self.log, self.cache, self.save_dir,
                                  default_answer_url=self.default_answer_url,
                                  default_hangup_url=self.default_hangup_url,
                                  default_http_method=self.default_http_method,
