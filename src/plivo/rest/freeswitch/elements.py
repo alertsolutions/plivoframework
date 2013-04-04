@@ -1082,7 +1082,7 @@ class GetDigits(Element):
                         loop = MAX_LOOPS  # Add a high number to Play infinitely
                     # Play the file loop number of times
                     for i in range(loop):
-                        self.sound_files.append(re_root(sound_file, outbound_socket.save_dir))
+                        self.sound_files.append(sound_file)
                     # Infinite Loop, so ignore other children
                     if loop == MAX_LOOPS:
                         break

@@ -386,7 +386,6 @@ class RESTInboundSocket(InboundEventSocket):
                       'CallUUID': aleg_uuid,
                       'Duration': duration,
                       'SIPCode': sip_code,
-                      'OriginationUUID': origination_uuid
                      }
             # add extra params
             extra_params = self.get_extra_fs_vars(event)
