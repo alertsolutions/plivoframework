@@ -23,7 +23,8 @@ from plivo.rest.freeswitch.helpers import HTTPRequest, get_substring, \
                                         is_valid_sound_proto
 
 
-EVENT_FILTER = "BACKGROUND_JOB CHANNEL_PROGRESS CHANNEL_PROGRESS_MEDIA CHANNEL_HANGUP_COMPLETE CHANNEL_STATE SESSION_HEARTBEAT CALL_UPDATE RECORD_STOP CUSTOM conference::maintenance"
+#EVENT_FILTER = "BACKGROUND_JOB CHANNEL_PROGRESS CHANNEL_PROGRESS_MEDIA CHANNEL_HANGUP_COMPLETE CHANNEL_STATE SESSION_HEARTBEAT CALL_UPDATE RECORD_STOP CUSTOM MEDIA_BUG_START MEDIA_BUG_STOP conference::maintenance"
+EVENT_FILTER = "ALL"
 
 
 class RESTInboundSocket(InboundEventSocket):
@@ -510,6 +511,30 @@ class RESTInboundSocket(InboundEventSocket):
         if self.get_server().call_heartbeat_url:
             self.log.debug("Sending heartbeat to callback: %s" % self.get_server().call_heartbeat_url)
             spawn_raw(self.send_to_url, self.get_server().call_heartbeat_url, params)
+
+    def on_media_bug_stop(self, event):
+        """MEDIA_BUG_STOP event will have AMD result
+        """
+        amd_result = event['variable_amd_result']
+        if amd_result:
+            self.log.info('amd_result' % amd_result)
+        else:
+            self.log.info('there was no amd_result')
+
+        amd_status = event['variable_amd_status']
+        if amd_status:
+            self.log.info('amd_status' % amd_status)
+        else:
+            self.log.info('there was no amd_rstatus')
+
+        amd_url = event['variable_plivo_amd_callback_url']
+        params = {
+            'RequestUUID': event['variable_plivo_request_uuid'],
+            'CallUUID': event['Unique-ID'],
+            'AmdResult': amd_result,
+            'AmdStatus': amd_status
+        }
+        spawn_raw(self.send_to_url, amd_url, params)
 
     def set_hangup_complete(self, request_uuid, call_uuid, reason, event, hangup_url):
         params = {}

@@ -296,6 +296,7 @@ class EventSocket(Commands):
         E.g. Receives Background_Job event and calls on_background_job function.
         '''
         # When no callbacks found, try unbound_event.
+        self.log.info('Event-Name %s' % event['Event-Name'])
         try:
             callback = self._event_callbacks[event['Event-Name']]
         except KeyError:

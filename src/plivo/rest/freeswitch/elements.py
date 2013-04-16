@@ -78,6 +78,11 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'validDigits': '0123456789*#',
                 'invalidDigitsSound': ''
         },
+        'AnsweringMachineDetect': {
+                #'amdResultUrl': DYNAMIC! MUST BE SET IN METHOD,
+                'preDetectPause': 500,
+                'detectTime': 2000
+        },
         'Hangup': {
                 'reason': '',
                 'schedule': 0
@@ -1140,6 +1145,39 @@ class GetDigits(Element):
             return
         # no digits received
         outbound_socket.log.info("GetDigits, No Digits Received")
+
+
+class AnsweringMachineDetect(Element):
+    """Detect person or answering machine
+
+    amdResultUrl: callback URL after detection
+    preDetectPause: pause time (ms) before beginning detection
+    detectTime: amount of time to wait for detection to complete
+    """
+    def __init__(self):
+        Element.__init__(self)
+        self.amd_callback_url = ''
+        self.pre_detect_pause = 500
+        self.detect_time =  2000
+
+    def parse_element(self, element, uri=None):
+        Element.parse_element(self, element, uri)
+        self.amd_callback_url = self.extract_attribute_value('amdResultUrl')
+        self.pre_detect_pause = self.extract_attribute_value('preDetectPause', 500)
+        self.detect_time = self.extract_attribute_value('detectTime', 2000)
+        if not is_valid_url(self.amd_callback_url):
+            raise RESTFormatException("amdResultUrl is not a valid URL")
+
+    def execute(self, outbound_socket):
+        outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
+        outbound_socket.set('plivo_amd_callback_url=%s' % self.amd_callback_url)
+        outbound_socket.sleep(self.pre_detect_pause)
+        outbound_socket.wait_for_action()
+        outbound_socket.execute("voice_start")
+        outbound_socket.sleep(self.detect_time)
+        #pause_str = 'file_string://silence_stream://%s' % self.detect_time
+        #outbound_socket.playback(pause_str)
+        outbound_socket.wait_for_action()
 
 
 class Hangup(Element):
