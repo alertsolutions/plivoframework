@@ -1157,16 +1157,16 @@ class AnsweringMachineDetect(Element):
     def __init__(self):
         Element.__init__(self)
         self.amd_callback_url = ''
-        self.pre_detect_pause = 500
+        self.pre_detect_pause = 250
         self.detect_time =  2000
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
         self.amd_callback_url = self.extract_attribute_value('amdResultUrl')
-        self.pre_detect_pause = self.extract_attribute_value('preDetectPause', 500)
-        self.detect_time = self.extract_attribute_value('detectTime', 2000)
         if not is_valid_url(self.amd_callback_url):
             raise RESTFormatException("amdResultUrl is not a valid URL")
+        self.pre_detect_pause = self.extract_attribute_value('preDetectPause', 250)
+        self.detect_time = int(self.extract_attribute_value('detectTime', 2000))
 
     def execute(self, outbound_socket):
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
@@ -1174,10 +1174,27 @@ class AnsweringMachineDetect(Element):
         outbound_socket.sleep(self.pre_detect_pause)
         outbound_socket.wait_for_action()
         outbound_socket.execute("voice_start")
-        outbound_socket.sleep(self.detect_time)
-        #pause_str = 'file_string://silence_stream://%s' % self.detect_time
-        #outbound_socket.playback(pause_str)
-        outbound_socket.wait_for_action()
+        pause_incr = 250
+        pause_str = 'file_string://silence_stream://%s' % pause_incr
+        total_pause = 0
+        amd_status = None
+        while amd_status is None and total_pause <= self.detect_time:
+            outbound_socket.playback(pause_str)
+            event = outbound_socket.wait_for_action()
+            amd_status = event['variable_amd_status']
+            amd_result = event['variable_amd_result']
+            total_pause += pause_incr
+        amd_status = amd_status if amd_status is not None else 'person'
+        amd_result = amd_result if amd_result is not None else 'no-luck'
+        outbound_socket.log.info('amd_status: %s' % amd_status)
+        outbound_socket.log.info('amd_result: %s' % amd_result)
+        params = {
+            'RequestUUID': event['variable_plivo_request_uuid'],
+            'CallUUID': event['Unique-ID'],
+            'AmdResult': amd_result,
+            'AmdStatus': amd_status
+        }
+        self.fetch_rest_xml(self.amd_callback_url, params)
 
 
 class Hangup(Element):

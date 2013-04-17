@@ -23,8 +23,7 @@ from plivo.rest.freeswitch.helpers import HTTPRequest, get_substring, \
                                         is_valid_sound_proto
 
 
-#EVENT_FILTER = "BACKGROUND_JOB CHANNEL_PROGRESS CHANNEL_PROGRESS_MEDIA CHANNEL_HANGUP_COMPLETE CHANNEL_STATE SESSION_HEARTBEAT CALL_UPDATE RECORD_STOP CUSTOM MEDIA_BUG_START MEDIA_BUG_STOP conference::maintenance"
-EVENT_FILTER = "ALL"
+EVENT_FILTER = "BACKGROUND_JOB CHANNEL_PROGRESS CHANNEL_PROGRESS_MEDIA CHANNEL_HANGUP_COMPLETE CHANNEL_STATE SESSION_HEARTBEAT CALL_UPDATE RECORD_STOP CUSTOM conference::maintenance"
 
 
 class RESTInboundSocket(InboundEventSocket):
@@ -525,7 +524,7 @@ class RESTInboundSocket(InboundEventSocket):
         if amd_status:
             self.log.info('amd_status' % amd_status)
         else:
-            self.log.info('there was no amd_rstatus')
+            self.log.info('there was no amd_status')
 
         amd_url = event['variable_plivo_amd_callback_url']
         params = {
