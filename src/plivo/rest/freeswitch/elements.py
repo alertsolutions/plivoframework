@@ -83,6 +83,9 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'preDetectPause': 500,
                 'detectTime': 2000
         },
+        'LeaveMessage': {
+                'waitForBeep': 3
+        },
         'Hangup': {
                 'reason': '',
                 'schedule': 0
@@ -1170,12 +1173,11 @@ class AnsweringMachineDetect(Element):
 
     def execute(self, outbound_socket):
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
-        outbound_socket.set('plivo_amd_callback_url=%s' % self.amd_callback_url)
-        outbound_socket.sleep(self.pre_detect_pause)
+        outbound_socket.playback('silence_stream://%s' % self.pre_detect_pause)
         outbound_socket.wait_for_action()
         outbound_socket.execute("voice_start")
         pause_incr = 250
-        pause_str = 'file_string://silence_stream://%s' % pause_incr
+        pause_str = 'silence_stream://%s' % pause_incr
         total_pause = 0
         amd_status = None
         while amd_status is None and total_pause <= self.detect_time:
@@ -1196,6 +1198,72 @@ class AnsweringMachineDetect(Element):
         }
         self.fetch_rest_xml(self.amd_callback_url, params)
 
+class LeaveMessage(Element):
+
+    def __init__(self):
+        Element.__init__(self)
+        self.nestables = ('Speak', 'Play')
+        self.wait_for_beep = 3
+
+    def parse_element(self, element, uri=None):
+        Element.parse_element(self, element, uri)
+        self.wait_for_beep = int(self.extract_attribute_value("waitForBeep", 3))
+
+    def execute(self, outbound_socket):
+        play_str = 'file_string://silence_stream://1'
+        for child_instance in self.children:
+            if isinstance(child_instance, Play):
+                sound_file = child_instance.sound_file_path
+                if sound_file:
+                    loop = child_instance.loop_times
+                    if loop == 0:
+                        loop = MAX_LOOPS  # Add a high number to Play infinitely
+                    # Play the file loop number of times
+                    for x in range(loop):
+                        play_str += '!' + sound_file
+            elif isinstance(child_instance, Speak):
+                text = child_instance.text
+                # escape simple quote
+                text = text.replace("'", "\\'")
+                loop = child_instance.loop_times
+                child_type = child_instance.item_type
+                method = child_instance.method
+                say_str = ''
+                if child_type and method:
+                    language = child_instance.language
+                    say_args = "%s.wav %s %s %s '%s'" \
+                                    % (language, language, child_type, method, text)
+                    say_str = "${say_string %s}" % say_args
+                else:
+                    engine = child_instance.engine
+                    voice = child_instance.voice
+                    say_str = "say:%s:%s:'%s'" % (engine, voice, text)
+                if not say_str:
+                    continue
+                for x in range(loop):
+                    play_str += '!' + say_str
+        outbound_socket.execute("record_session", "/tmp/recordings/${plivo_to}-${strftime(%Y-%m-%d-%H-%M-%S)}.wav")
+        #outbound_socket.playback("silence_stream://2000")
+        #outbound_socket.wait_for_action()
+        outbound_socket.execute("avmd")
+        i = 0
+        while True:
+            outbound_socket.playback("silence_stream://1000")
+            e = outbound_socket.wait_for_action()
+            i += 1
+            if e['Event-Name'] == 'CUSTOM':
+                if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
+                    #outbound_socket.log.info('beep event: %s' % str(e))
+                    outbound_socket.wait_for_action() # pop off the most recent playback event
+                    break
+            if i > self.wait_for_beep:
+                outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (e['Unique-ID'], self.wait_for_beep))
+                break
+
+        outbound_socket.execute("avmd", "stop")
+        outbound_socket.set('playback_delimiter=!')
+        outbound_socket.playback(play_str)
+        outbound_socket.wait_for_action()
 
 class Hangup(Element):
     """Hangup the call

@@ -208,8 +208,13 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             self._action_queue.put(event)
 
     def on_custom(self, event):
+        if self.current_element == 'LeaveMessage':
+            if event['Event-Subclass'] == 'avmd::beep' \
+                and event['Unique-ID'] == self.get_channel_unique_id():
+                self.log.info('got beep for ' + event['Unique-ID'])
+                self._action_queue.put(event)
         # case conference event
-        if self.current_element == 'Conference':
+        elif self.current_element == 'Conference':
             # special case to get Member-ID for Conference
             if event['Event-Subclass'] == 'conference::maintenance' \
                 and event['Action'] == 'add-member' \
