@@ -208,8 +208,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         if self.current_element == 'GetSpeech' \
             and event['Speech-Type'] == 'detected-speech':
             self._action_queue.put(event)
-        elif self.current_element == 'AnsweringMachineDetect' \
-            and event.get_body() == 'amd_complete':
+        elif self.current_element == 'AnsweringMachineDetect':
             self._action_queue.put(event)
 
     def on_detected_tone(self, event):

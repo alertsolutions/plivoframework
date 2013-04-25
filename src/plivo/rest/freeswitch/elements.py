@@ -1086,6 +1086,7 @@ class GetDigits(Element):
             if isinstance(child_instance, Play):
                 sound_file = child_instance.sound_file_path
                 if sound_file:
+                    #sound_file = re_root(sound_file, outbound_socket.save_dir)
                     loop = child_instance.loop_times
                     if loop == 0:
                         loop = MAX_LOOPS  # Add a high number to Play infinitely
@@ -1154,6 +1155,7 @@ class GetDigits(Element):
 class AnsweringMachineDetect(Element):
     """Detect person or answering machine
 
+    detectType:
     amdResultUrl: callback URL after detection
     preDetectPause: pause time (ms) before beginning detection
     detectTime: amount of time to wait for detection to complete
@@ -1163,12 +1165,19 @@ class AnsweringMachineDetect(Element):
         self.amd_callback_url = ''
         self.pre_detect_pause = 250
         self.detect_time =  2000
+        self.use_mod_amd = True
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
         self.amd_callback_url = self.extract_attribute_value('amdResultUrl')
         if not is_valid_url(self.amd_callback_url):
             raise RESTFormatException("amdResultUrl is not a valid URL")
+        detect_type = self.extract_attribute_value('detectType')
+        if not detect_type:
+            detect_type = 'advanced'
+        if detect_type not in ('simple', 'advanced'):
+            raise RESTFormatException("detectType must be 'simple' or 'advanced'")
+        self.use_mod_amd = detect_type == 'advanced'
         self.pre_detect_pause = self.extract_attribute_value('preDetectPause', 250)
         self.detect_time = int(self.extract_attribute_value('detectTime', 2000))
 
@@ -1176,21 +1185,59 @@ class AnsweringMachineDetect(Element):
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
         outbound_socket.playback('silence_stream://%s' % self.pre_detect_pause)
         outbound_socket.wait_for_action()
-        outbound_socket.execute("voice_start")
+        if self.use_mod_amd:
+            outbound_socket.execute("voice_start")
+        else:
+            outbound_socket.execute("detect_speech", "pocketsphinx answer_hello answer_hello")
         pause_incr = 250
         total_pause = 0
         amd_status = None
+        amd_result = None
         while amd_status is None and total_pause <= self.detect_time:
             event = outbound_socket.wait_for_action(0.25)
-            if event['Event-Name'] == 'DETECTED_SPEECH':
-                amd_status = event['amd_status']
-                amd_result = event['amd_result']
-                break
             total_pause += pause_incr
+            if event['Event-Name'] == 'DETECTED_SPEECH':
+                if self.use_mod_amd and event.get_body() == 'amd_complete':
+                    amd_status = event['amd_status']
+                    amd_result = event['amd_result']
+                    break
+                else:
+                    if event['Speech-Type'] == 'begin-speaking':
+                        outbound_socket.execute('detect_speech', 'stop')
+                        outbound_socket.wait_for_silence("200 25 0 %s" % self.detect_time)
+                        new_e = outbound_socket.wait_for_action()
+                        total_pause += self.detect_time
+                        if new_e['variable_detected_silence'] == 'false':
+                            amd_status = 'machine'
+                            amd_result = 'simple-still-talking'
+                            break
+                        else:
+                            amd_result = 'simple-silence-after-hello'
+                    elif event['Speech-Type'] == 'detected-speech':
+                        outbound_socket.execute('detect_speech', 'stop')
+                        speech_result = event.get_body()
+                        outbound_socket.log.info("simple AMD, result '%s'" % str(speech_result))
+                        if not speech_result:
+                            continue
+                        try:
+                            result = ' '.join(speech_result.splitlines())
+                            doc = etree.fromstring(result)
+                            sinterp = doc.find('interpretation')
+                            if doc.tag != 'result':
+                                raise RESTFormatException('No result Tag Present')
+                            outbound_socket.log.debug("simple AMD: %s %s %s" % (str(doc), str(sinterp), str(sinput)))
+                            confidence = sinterp.get('confidence', '0')
+                            if confidence < 75:
+                                continue
+                            amd_result = 'simple-hello-heard'
+                        except Exception, e:
+                            outbound_socket.log.error("simple AMD: result failure, cannot parse result: %s" % str(e))
+
         amd_status = amd_status if amd_status is not None else 'person'
-        amd_result = amd_result if amd_result is not None else 'no-luck'
-        outbound_socket.log.info('amd_status: %s' % amd_status)
-        outbound_socket.log.info('amd_result: %s' % amd_result)
+        amd_result = amd_result if amd_result is not None else 'unknown'
+        outbound_socket.log.info("amd_status: %s" % amd_status)
+        outbound_socket.log.info("amd_result: %s" % amd_result)
+        outbound_socket.api("log info amd_status: %s, amd_result: %s\n" % (amd_status, amd_result))
         params = {
             'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
             'CallUUID': event['Unique-ID'],
