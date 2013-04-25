@@ -84,7 +84,8 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'detectTime': 2000
         },
         'LeaveMessage': {
-                'waitForBeep': 3
+                'waitForBeep': 3,
+                'detectType': 'avmd'
         },
         'Hangup': {
                 'reason': '',
@@ -1177,21 +1178,21 @@ class AnsweringMachineDetect(Element):
         outbound_socket.wait_for_action()
         outbound_socket.execute("voice_start")
         pause_incr = 250
-        pause_str = 'silence_stream://%s' % pause_incr
         total_pause = 0
         amd_status = None
         while amd_status is None and total_pause <= self.detect_time:
-            outbound_socket.playback(pause_str)
-            event = outbound_socket.wait_for_action()
-            amd_status = event['variable_amd_status']
-            amd_result = event['variable_amd_result']
+            event = outbound_socket.wait_for_action(0.25)
+            if event['Event-Name'] == 'DETECTED_SPEECH':
+                amd_status = event['amd_status']
+                amd_result = event['amd_result']
+                break
             total_pause += pause_incr
         amd_status = amd_status if amd_status is not None else 'person'
         amd_result = amd_result if amd_result is not None else 'no-luck'
         outbound_socket.log.info('amd_status: %s' % amd_status)
         outbound_socket.log.info('amd_result: %s' % amd_result)
         params = {
-            'RequestUUID': event['variable_plivo_request_uuid'],
+            'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
             'CallUUID': event['Unique-ID'],
             'AmdResult': amd_result,
             'AmdStatus': amd_status
@@ -1202,12 +1203,17 @@ class LeaveMessage(Element):
 
     def __init__(self):
         Element.__init__(self)
-        self.nestables = ('Speak', 'Play')
+        self.nestables = ('Speak', 'Play', 'Hangup')
         self.wait_for_beep = 3
+        self.use_avmd = True
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
-        self.wait_for_beep = int(self.extract_attribute_value("waitForBeep", 3))
+        self.wait_for_beep = int(self.extract_attribute_value('waitForBeep', 3))
+        detect_type = self.extract_attribute_value('detectType', 'avmd')
+        if detect_type not in ('avmd', 'spandsp'):
+            raise RESTFormatException("valid 'detectType values are 'avmd' or 'spandsp'")
+        self.use_avmd = detect_type == 'avmd'
 
     def execute(self, outbound_socket):
         play_str = 'file_string://silence_stream://1'
@@ -1215,6 +1221,7 @@ class LeaveMessage(Element):
             if isinstance(child_instance, Play):
                 sound_file = child_instance.sound_file_path
                 if sound_file:
+                    sound_file = re_root(sound_file, outbound_socket.save_dir)
                     loop = child_instance.loop_times
                     if loop == 0:
                         loop = MAX_LOOPS  # Add a high number to Play infinitely
@@ -1242,25 +1249,39 @@ class LeaveMessage(Element):
                     continue
                 for x in range(loop):
                     play_str += '!' + say_str
-        outbound_socket.execute("record_session", "/tmp/recordings/${plivo_to}-${strftime(%Y-%m-%d-%H-%M-%S)}.wav")
-        #outbound_socket.playback("silence_stream://2000")
-        #outbound_socket.wait_for_action()
-        outbound_socket.execute("avmd")
-        i = 0
+        #outbound_socket.execute("record_session", "/tmp/recordings/${plivo_to}-${strftime(%Y-%m-%d-%H-%M-%S)}.wav")
+        if self.use_avmd:
+            outbound_socket.execute('avmd')
+        else:
+            outbound_socket.execute('start_tone_detect', 'vm_beeps')
+
+        i = 0.0
         while True:
-            outbound_socket.playback("silence_stream://1000")
-            e = outbound_socket.wait_for_action()
-            i += 1
-            if e['Event-Name'] == 'CUSTOM':
+            e = outbound_socket.wait_for_action(0.5)
+            i += 0.5
+            if self.use_avmd and e['Event-Name'] == 'CUSTOM':
                 if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
                     #outbound_socket.log.info('beep event: %s' % str(e))
                     outbound_socket.wait_for_action() # pop off the most recent playback event
                     break
+            else: 
+                if e['Event-Name'] == 'DETECTED_TONE':
+                    outbound_socket.wait_for_silence("200 25 0 550")
+                    new_e = outbound_socket.wait_for_action()
+                    is_silent = new_e['variable_detected_silence'] == 'true'
+                    if is_silent:
+                        outbound_socket.log.info("detected silence")
+                        break
+                    i += 0.55
+
             if i > self.wait_for_beep:
                 outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (e['Unique-ID'], self.wait_for_beep))
                 break
 
-        outbound_socket.execute("avmd", "stop")
+        if self.use_avmd:
+            outbound_socket.execute('avmd', 'stop')
+        else:
+            outbound_socket.execute('stop_tone_detect')
         outbound_socket.set('playback_delimiter=!')
         outbound_socket.playback(play_str)
         outbound_socket.wait_for_action()

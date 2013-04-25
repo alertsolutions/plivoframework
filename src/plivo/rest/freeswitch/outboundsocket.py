@@ -31,6 +31,7 @@ from plivo.rest.freeswitch.exceptions import RESTFormatException, \
 
 MAX_REDIRECT = 9999
 
+EVENTS_FILTER = [ 'CHANNEL_EXECUTE', 'CHANNEL_EXECUTE_COMPLETE', 'CUSTOM',  'DETECTED_SPEECH', 'DETECTED_TONE',  'conference::maintenance', 'plivo::dial' ]
 
 class RequestLogger(object):
     """
@@ -76,6 +77,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
                         'speak',
                         'conference',
                         'park',
+                        'wait_for_silence'
                        )
     NO_ANSWER_ELEMENTS = ('Wait',
                           'PreAnswer',
@@ -156,14 +158,14 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             raise RESTHangup()
         return response
 
-    def wait_for_action(self):
+    def wait_for_action(self, wait_for=3600):
         """
         Wait until an action is over
         and return action event.
         """
         self.log.debug("wait for action start")
         try:
-            event = self._action_queue.get(timeout=3600)
+            event = self._action_queue.get(timeout=wait_for)
             self.log.debug("wait for action end %s" % str(event))
             return event
         except gevent.queue.Empty:
@@ -205,6 +207,13 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         # detect speech for GetSpeech
         if self.current_element == 'GetSpeech' \
             and event['Speech-Type'] == 'detected-speech':
+            self._action_queue.put(event)
+        elif self.current_element == 'AnsweringMachineDetect' \
+            and event.get_body() == 'amd_complete':
+            self._action_queue.put(event)
+
+    def on_detected_tone(self, event):
+        if self.current_element == 'LeaveMessage':
             self._action_queue.put(event)
 
     def on_custom(self, event):
@@ -328,9 +337,11 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         self.myevents()
         self.divert_events('on')
         if self._is_eventjson:
-            self.eventjson('CUSTOM conference::maintenance plivo::dial')
+            self.eventjson('all')
         else:
-            self.eventplain('CUSTOM conference::maintenance plivo::dial')
+            self.eventplain('all')
+        for x in EVENTS_FILTER:
+            self.filter("Event-Name %s" % x)
         # Set plivo app flag
         self.set('plivo_app=true')
         # Don't hangup after bridge

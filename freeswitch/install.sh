@@ -82,6 +82,7 @@ sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH
 [ -f modules.conf ] && cp modules.conf modules.conf.bak
 sed -i \
 -e "s/#applications\/mod_curl/applications\/mod_curl/g" \
+-e "s/#applications\/mod_avmd/applications\/mod_avmd/g" \
 -e "s/#asr_tts\/mod_flite/asr_tts\/mod_flite/g" \
 -e "s/#asr_tts\/mod_pocketsphinx/asr_tts\/mod_pocketsphinx/g" \
 -e "s/#asr_tts\/mod_tts_commandline/asr_tts\/mod_tts_commandline/g" \
@@ -115,9 +116,18 @@ sed -i -r \
 -e "s/<\!--\s?<load module=\"mod_soundtouch\"\/>\s?-->/<load module=\"mod_soundtouch\"\/>/g" \
 -e "s/<\!--\s?<load module=\"mod_say_ru\"\/>\s?-->/<load module=\"mod_say_ru\"\/>/g" \
 -e "s/<\!--\s?<load module=\"mod_say_zh\"\/>\s?-->/<load module=\"mod_say_zh\"\/>/g" \
--e 's/mod_say_zh.*$/&\n    <load module="mod_say_de"\/>\n    <load module="mod_say_es"\/>\n    <load module="mod_say_fr"\/>\n    <load module="mod_say_it"\/>\n    <load module="mod_say_nl"\/>\n    <load module="mod_say_hu"\/>\n    <load module="mod_say_th"\/>/' \
+-e 's/mod_say_zh.*$/&\n    <load module="mod_say_de"\/>\n    <load module="mod_say_es"\/>\n    <load module="mod_say_fr"\/>\n    <load module="mod_say_it"\/>\n    <load module="mod_say_nl"\/>\n    <load module="mod_say_hu"\/>\n    <load module="mod_say_th"\/>\n    <load module="mod_avmd"\/>/' \
 modules.conf.xml
 
+sed -i -r \
+-e "s/<descriptors>/<descriptors>\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"../voicemail_tones/*.xml\"\/>\n\n/g" \
+spandsp.conf.xml
+
+mkdir -p $FS_INSTALLED_PATH/conf/voicemail_tones
+cd $FS_INSTALLED_PATH/conf/voicemail_tones
+
+[ -f vm_beeps.xml ] && mv vm_beeps.xml vm_beeps.xml.bak
+wget --no-check-certificate $FS_CONF_PATH/conf/vm_beeps.xml -O vm_beeps.xml
 
 #Configure Dialplan
 cd $FS_INSTALLED_PATH/conf/dialplan/

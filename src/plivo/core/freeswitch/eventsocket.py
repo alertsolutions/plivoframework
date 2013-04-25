@@ -205,6 +205,7 @@ class EventSocket(Commands):
         self.trace("callback %s" % str(func))
         # If callback response found, starts this method to get final event.
         event = func(event)
+        self.trace("read %s" % event['Event-Name'])
         self.trace("callback %s done" % str(func))
         if event and event['Event-Name']:
             self.trace("dispatch")
