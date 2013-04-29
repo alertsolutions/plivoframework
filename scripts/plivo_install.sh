@@ -8,13 +8,13 @@
 PLIVO_GIT_REPO=git://github.com/asajohnston/plivoframework.git
 PLIVO_SETUP_SCRIPT=https://raw.github.com/asajohnston/plivoframework/master/scripts/ez_setup.py
 
+# TODO: need better argument handling
+NOT_INTERACTIVE=$2
 
-BRANCH=$2
+BRANCH=$3
 if [ ! $BRANCH ]; then
     BRANCH=master
 fi
-
-NOT_INTERACTIVE=$3
 
 #####################################################
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
