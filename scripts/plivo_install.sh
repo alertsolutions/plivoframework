@@ -275,7 +275,8 @@ case $DIST in
     ;;
 esac
 
-
+[ ! -h /etc/plivo ] && ln -s "$REAL_PATH/etc/plivo/conf" /etc/plivo
+[ ! -h /var/log/plivo ] && ln -s "$REAL_PATH/tmp" /var/log/plivo
 
 clear
 # Install Complete
