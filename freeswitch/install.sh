@@ -45,7 +45,7 @@ case $DIST in
     'CENTOS')
         yum -y update
 
-        VERS=$(cat /etc/redhat-release |cut -d' ' -f4 |cut -d'.' -f1)
+        VERS=$(cat /etc/redhat-release |cut -d' ' -f3 |cut -d'.' -f1)
 
         COMMON_PKGS=" autoconf automake bzip2 cpio curl curl-devel curl-devel expat-devel fileutils gcc-c++ gettext-devel gnutls-devel libjpeg-devel libogg-devel libtiff-devel libtool libvorbis-devel make ncurses-devel nmap openssl openssl-devel openssl-devel perl patch unixODBC unixODBC-devel unzip wget zip zlib zlib-devel bison sox"
         if [ "$VERS" = "6" ]
@@ -123,13 +123,15 @@ sed -i -r \
 -e "s/<descriptors>/<descriptors>\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"../voicemail_tones/*.xml\"\/>\n\n/g" \
 spandsp.conf.xml
 
+# get the conf file with voicemail beep frequencies
+# can be used buy the mod_spandsp detect_tones application
 mkdir -p $FS_INSTALLED_PATH/conf/voicemail_tones
 cd $FS_INSTALLED_PATH/conf/voicemail_tones
 
 [ -f vm_beeps.xml ] && mv vm_beeps.xml vm_beeps.xml.bak
 wget --no-check-certificate $FS_CONF_PATH/conf/vm_beeps.xml -O vm_beeps.xml
 
-#Configure Dialplan
+# Configure Dialplan
 cd $FS_INSTALLED_PATH/conf/dialplan/
 
 # Place Plivo Default Dialplan in FreeSWITCH
@@ -140,10 +142,15 @@ wget --no-check-certificate $FS_CONF_PATH/conf/default.xml -O default.xml
 [ -f public.xml ] && mv public.xml public.xml.bak
 wget --no-check-certificate $FS_CONF_PATH/conf/public.xml -O public.xml
 
-#Configure Conference @plivo profile
+# Configure Conference @plivo profile
 cd $FS_INSTALLED_PATH/conf/autoload_configs/
 [ -f conference.conf.xml ] && mv conference.conf.xml conference.conf.xml.bak
 wget --no-check-certificate $FS_CONF_PATH/conf/conference.conf.xml -O conference.conf.xml
+
+# move core.db to ramdisk
+sed -i -r \
+-e "s/<\!--\s?<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\"\s?\/>\s?-->/<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\" \/>/" \
+switch.conf.xml
 
 cd $CURRENT_PATH
 
