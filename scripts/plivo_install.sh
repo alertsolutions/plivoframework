@@ -14,6 +14,8 @@ if [ ! $BRANCH ]; then
     BRANCH=master
 fi
 
+NOT_INTERACTIVE=$3
+
 #####################################################
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 PLIVO_ENV=$1
@@ -57,7 +59,9 @@ else
     echo ""
     ACTION='INSTALL'
 fi
-read INPUT
+if [ ! $NOT_INTERACTIVE ] ; then
+    read INPUT
+fi
 
 
 declare -i PY_MAJOR_VERSION
@@ -215,14 +219,18 @@ case $ACTION in
 	    echo " - $REAL_PATH/etc/plivo/default.conf"
 	    echo " - $REAL_PATH/etc/plivo/cache/cache.conf"
 	    echo "yes/no ?"
-	    read INPUT
+        if [ ! $NOT_INTERACTIVE ] ; then
+            read INPUT
+        else
+            INPUT='yes'
+        fi
 	    if [ "$INPUT" = "yes" ]; then
-	        CONFIG_OVERWRITE=yes
-                break
-            elif [ "$INPUT" = "no" ]; then
-	        CONFIG_OVERWRITE=no
-                break
-            fi
+            CONFIG_OVERWRITE=yes
+            break
+        elif [ "$INPUT" = "no" ]; then
+            CONFIG_OVERWRITE=no
+            break
+        fi
         done
     ;;
     "INSTALL")

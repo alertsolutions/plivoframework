@@ -33,7 +33,7 @@ echo ""
 echo "FreeSWITCH will be installed in $FS_INSTALLED_PATH"
 echo "Press any key to continue or CTRL-C to exit"
 echo ""
-read INPUT
+#read INPUT
 
 
 echo "Setting up Prerequisites and Dependencies for FreeSWITCH"
