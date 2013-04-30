@@ -120,7 +120,7 @@ sed -i -r \
 modules.conf.xml
 
 sed -i -r \
--e "s/<descriptors>/<descriptors>\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"../voicemail_tones/*.xml\"\/>\n\n/g" \
+-e "s/<descriptors>/<descriptors>\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"..\/voicemail_tones\/*.xml\"\/>/g" \
 spandsp.conf.xml
 
 # get the conf file with voicemail beep frequencies
