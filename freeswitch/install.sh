@@ -148,9 +148,13 @@ cd $FS_INSTALLED_PATH/conf/autoload_configs/
 wget --no-check-certificate $FS_CONF_PATH/conf/conference.conf.xml -O conference.conf.xml
 
 # move core.db to ramdisk
-sed -i -r \
--e "s/<\!--\s?<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\"\s?\/>\s?-->/<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\" \/>/" \
-switch.conf.xml
+# TODO: this method below is recommended by FreeSWITCH, but it breaks mod_sofia, mod_voicemail and more
+# TODO: either figure out all the config variables that need editing or just stick to the mount method
+# sed -i -r \
+# -e "s/<\!--\s?<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\"\s?\/>\s?-->/<param name=\"core-db-name\" value=\"\/dev\/shm\/core.db\" \/>/" \
+# switch.conf.xml
+echo "tmpfs                   $FS_INSTALLED_PATH/db    tmpfs   defaults    0 0" >> /etc/fstab
+mount $FS_INSTALLED_PATH/db
 
 cd $CURRENT_PATH
 
