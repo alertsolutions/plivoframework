@@ -15,6 +15,11 @@ FS_BASE_PATH=/usr/local/src/
 
 CURRENT_PATH=$PWD
 
+git_arg=''
+if [ "$1" == "stable" ] ; then
+    git_arg='-b v1.2.stable'
+fi
+
 # Identify Linux Distribution
 if [ -f /etc/debian_version ] ; then
     DIST="DEBIAN"
@@ -76,7 +81,7 @@ esac
 
 # Install FreeSWITCH
 cd $FS_BASE_PATH
-git clone $FS_GIT_REPO
+git clone $git_arg $FS_GIT_REPO
 cd $FS_BASE_PATH/freeswitch
 sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH
 [ -f modules.conf ] && cp modules.conf modules.conf.bak
