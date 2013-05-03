@@ -218,7 +218,7 @@ class PlivoRestApi(object):
 
     def _prepare_call_request(self, caller_id, caller_name, to, extra_dial_string, gw, gw_codecs,
                                 gw_timeouts, gw_retries, send_digits, send_preanswer, time_limit,
-                                hangup_on_ring, answer_url, ring_url, hangup_url, accountsid=''):
+                                hangup_on_ring, answer_url, ring_url, hangup_url, accountsid='', request_uuid=''):
         gateways = []
         gw_retry_list = []
         gw_codec_list = []
@@ -239,7 +239,8 @@ class PlivoRestApi(object):
             gw_retry_list = gw_retries.split(',')
 
         # create a new request uuid
-        request_uuid = str(uuid.uuid1())
+        if not request_uuid:
+            request_uuid = str(uuid.uuid1())
         # append args
         args_list.append("plivo_request_uuid=%s" % request_uuid)
         args_list.append("plivo_answer_url=%s" % answer_url)
@@ -574,12 +575,13 @@ class PlivoRestApi(object):
                 hangup_on_ring = get_post_param(request, 'HangupOnRing')
                 caller_name = get_post_param(request, 'CallerName') or ''
                 accountsid = get_post_param(request, 'AccountSID') or ''
+                request_uuid = get_post_param(request, 'RequestUUID') or ''
 
                 call_req = self._prepare_call_request(
                                     caller_id, caller_name, to, extra_dial_string,
                                     gw, gw_codecs, gw_timeouts, gw_retries,
                                     send_digits, send_preanswer, time_limit, hangup_on_ring,
-                                    answer_url, ring_url, hangup_url, accountsid)
+                                    answer_url, ring_url, hangup_url, accountsid, request_uuid)
 
                 request_uuid = call_req.request_uuid
                 self._rest_inbound_socket.call_requests[request_uuid] = call_req
