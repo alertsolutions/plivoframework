@@ -172,7 +172,7 @@ class SysLogger(StdoutLogger):
 class FileLogger(StdoutLogger):
     def __init__(self, logfile='/tmp/%s.log' % __default_servicename__, \
                  loglevel=LOG_DEBUG, servicename=__default_servicename__):
-        h = logging.FileHandler(filename=logfile)
+        h = logging.handlers.RotatingFileHandler(filename=logfile, mode='a', maxBytes=104857600, backupCount=100)
         h.setLevel(loglevel)
         fmt = logging.Formatter("%(asctime)s "+servicename+"[%(process)d]: %(levelname)s: %(message)s")
         h.setFormatter(fmt)

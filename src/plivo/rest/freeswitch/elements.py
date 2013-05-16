@@ -1196,8 +1196,11 @@ class AnsweringMachineDetect(Element):
         while amd_status is None and total_pause <= self.detect_time:
             event = outbound_socket.wait_for_action(0.25)
             total_pause += pause_incr
+            if event['Event-Name'] is not None:
+                outbound_socket.log.info('waiting for amd %s' % event['Event-Name'])
             if event['Event-Name'] == 'DETECTED_SPEECH':
                 if self.use_mod_amd and event.get_body() == 'amd_complete':
+                    outbound_socket.log.info('detect block')
                     amd_status = event['amd_status']
                     amd_result = event['amd_result']
                     break
@@ -1233,14 +1236,18 @@ class AnsweringMachineDetect(Element):
                         except Exception, e:
                             outbound_socket.log.error("simple AMD: result failure, cannot parse result: %s" % str(e))
 
+        if amd_status is None:
+            outbound_socket.log.info('amd timeout')
+
         amd_status = amd_status if amd_status is not None else 'person'
         amd_result = amd_result if amd_result is not None else 'unknown'
-        outbound_socket.log.info("amd_status: %s" % amd_status)
-        outbound_socket.log.info("amd_result: %s" % amd_result)
+        call_uuid = event['uuid'] if self.use_mod_amd else event['Unique-ID']
+        outbound_socket.log.info("amd_status: %s for %s" % (amd_status, call_uuid))
+        outbound_socket.log.info("amd_result: %s for %s" % (amd_result, call_uuid))
         outbound_socket.api("log info amd_status: %s, amd_result: %s\n" % (amd_status, amd_result))
         params = {
             'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
-            'CallUUID': event['Unique-ID'],
+            'CallUUID': call_uuid,
             'AmdResult': amd_result,
             'AmdStatus': amd_status
         }

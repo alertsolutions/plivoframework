@@ -169,7 +169,10 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             self.log.debug("wait for action end %s" % str(event))
             return event
         except gevent.queue.Empty:
-            self.log.warn("wait for action end timed out!")
+            if wait_for == 3600:
+                self.log.warn("wait for action end timed out!")
+            else:
+                self.log.debug("wait for action end timed out!")
             return Event()
 
 
@@ -205,6 +208,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
 
     def on_detected_speech(self, event):
         # detect speech for GetSpeech
+        self.log.debug('DETECTED_SPEECH => %s' % str(event))
         if self.current_element == 'GetSpeech' \
             and event['Speech-Type'] == 'detected-speech':
             self._action_queue.put(event)
