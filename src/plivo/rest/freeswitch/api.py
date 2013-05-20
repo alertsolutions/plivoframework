@@ -218,7 +218,8 @@ class PlivoRestApi(object):
 
     def _prepare_call_request(self, caller_id, caller_name, to, extra_dial_string, gw, gw_codecs,
                                 gw_timeouts, gw_retries, send_digits, send_preanswer, time_limit,
-                                hangup_on_ring, answer_url, ring_url, hangup_url, accountsid='', request_uuid=''):
+                                hangup_on_ring, answer_url, ring_url, hangup_url, accountsid='',
+                                request_uuid='', record_call=False):
         gateways = []
         gw_retry_list = []
         gw_codec_list = []
@@ -282,7 +283,14 @@ class PlivoRestApi(object):
                                                     % (exec_on_media, send_digits))
                 exec_on_media += 1
             else:
-                args_list.append("execute_on_answer='send_dtmf %s'" % send_digits)
+                args_list.append("execute_on_answer%s='send_dtmf %s'" \
+                                                    % ('_1' if record_call else '', send_digits))
+
+        if record_call:
+            filename = "%s_%s-%s" % (datetime.now().strftime("%Y%m%d-%H%M%S"), caller_id, to)
+            recordfile = "%s/%s/%s.wav" % (self.save_dir, datetime.now().strftime("%Y-%m-%d"), filename)
+            args_list.append("execute_on_answer%s='record_session %s'" \
+                % ('_2' if send_digits and not send_preanswer else '', recordfile))
 
         # set time_limit
         try:
@@ -576,12 +584,13 @@ class PlivoRestApi(object):
                 caller_name = get_post_param(request, 'CallerName') or ''
                 accountsid = get_post_param(request, 'AccountSID') or ''
                 request_uuid = get_post_param(request, 'RequestUUID') or ''
+                record_call = get_post_param(request, 'RecordCall') == 'true'
 
                 call_req = self._prepare_call_request(
                                     caller_id, caller_name, to, extra_dial_string,
                                     gw, gw_codecs, gw_timeouts, gw_retries,
                                     send_digits, send_preanswer, time_limit, hangup_on_ring,
-                                    answer_url, ring_url, hangup_url, accountsid, request_uuid)
+                                    answer_url, ring_url, hangup_url, accountsid, request_uuid, record_call)
 
                 request_uuid = call_req.request_uuid
                 self._rest_inbound_socket.call_requests[request_uuid] = call_req

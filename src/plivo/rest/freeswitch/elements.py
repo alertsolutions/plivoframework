@@ -1303,7 +1303,6 @@ class LeaveMessage(Element):
                     continue
                 for x in range(loop):
                     play_str += '!' + say_str
-        #outbound_socket.execute("record_session", "/tmp/recordings/${plivo_to}-${strftime(%Y-%m-%d-%H-%M-%S)}.wav")
         if self.use_avmd:
             outbound_socket.execute('avmd')
         else:
