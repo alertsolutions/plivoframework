@@ -1238,6 +1238,8 @@ class AnsweringMachineDetect(Element):
 
         if amd_status is None:
             outbound_socket.log.info('amd timeout')
+            if self.use_mod_amd:
+                outbound_socket.execute('voice_stop')
 
         amd_status = amd_status if amd_status is not None else 'person'
         amd_result = amd_result if amd_result is not None else 'unknown'
