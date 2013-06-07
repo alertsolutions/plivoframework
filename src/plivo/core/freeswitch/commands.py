@@ -10,6 +10,7 @@ Please refer to http://wiki.freeswitch.org/wiki/Mod_event_socket#Command_documen
 
 
 class Commands(object):
+
     def api(self, args):
         "Please refer to http://wiki.freeswitch.org/wiki/Event_Socket#api"
         return self._protocol_send("api", args)

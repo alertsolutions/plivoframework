@@ -4,6 +4,7 @@
 from gevent import monkey
 monkey.patch_all()
 
+import time
 import os.path
 import traceback
 try:
@@ -333,6 +334,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
 
 
     def _run(self):
+        then = time.time()
         self.connect()
         self.resume()
         # Linger to get all remaining events before closing
@@ -351,6 +353,8 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         self.set('hangup_after_bridge=false')
         channel = self.get_channel()
         self.call_uuid = self.get_channel_unique_id()
+        duration = time.time() - then
+        self.log.debug('channel setup took %d' % duration)
         # Set CallerName to Session Params
         self.session_params['CallerName'] = channel.get_header('Caller-Caller-ID-Name') or ''
         # Set CallUUID to Session Params
@@ -623,7 +627,8 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             self.validate_element(element, element_instance)
 
     def validate_element(self, element, element_instance):
-        children = element.getchildren()
+        #children = element.getchildren()
+        children = list(element)
         if children and not element_instance.nestables:
             raise RESTFormatException("%s cannot have any children!"
                                             % element_instance.name)
@@ -632,13 +637,16 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
                 raise RESTFormatException("%s is not nestable inside %s"
                                             % (child, element_instance.name))
             else:
-                self.parse_children(child, element_instance)
+                #self.log.debug('%s has child %s' % (element_instance.name, child))
+                child_instance = self.parse_children(child, element_instance)
+                self.validate_element(child, child_instance)
 
     def parse_children(self, child_element, parent_instance):
         child_element_class = getattr(elements, str(child_element.tag), None)
         child_element_instance = child_element_class()
         child_element_instance.parse_element(child_element, None)
         parent_instance.children.append(child_element_instance)
+        return child_element_instance
 
     def execute_xml(self):
         try:

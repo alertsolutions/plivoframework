@@ -102,6 +102,8 @@ ELEMENTS_DEFAULT_PARAMS = {
         'Wait': {
                 'length': 1
         },
+        'PlayMany' : {
+        },
         'Play': {
                 #url: SET IN ELEMENT BODY
                 'loop': 1
@@ -1259,7 +1261,7 @@ class LeaveMessage(Element):
 
     def __init__(self):
         Element.__init__(self)
-        self.nestables = ('Speak', 'Play', 'Hangup')
+        self.nestables = ('Speak', 'Play', 'Hangup', 'PlayMany')
         self.wait_for_beep = 3
         self.use_avmd = True
 
@@ -1272,39 +1274,15 @@ class LeaveMessage(Element):
         self.use_avmd = detect_type == 'avmd'
 
     def execute(self, outbound_socket):
-        play_str = 'file_string://silence_stream://1'
+        play_str = ''
         for child_instance in self.children:
-            if isinstance(child_instance, Play):
-                sound_file = child_instance.sound_file_path
-                if sound_file:
-                    sound_file = re_root(sound_file, outbound_socket.save_dir)
-                    loop = child_instance.loop_times
-                    if loop == 0:
-                        loop = MAX_LOOPS  # Add a high number to Play infinitely
-                    # Play the file loop number of times
-                    for x in range(loop):
-                        play_str += '!' + sound_file
-            elif isinstance(child_instance, Speak):
-                text = child_instance.text
-                # escape simple quote
-                text = text.replace("'", "\\'")
-                loop = child_instance.loop_times
-                child_type = child_instance.item_type
-                method = child_instance.method
-                say_str = ''
-                if child_type and method:
-                    language = child_instance.language
-                    say_args = "%s.wav %s %s %s '%s'" \
-                                    % (language, language, child_type, method, text)
-                    say_str = "${say_string %s}" % say_args
-                else:
-                    engine = child_instance.engine
-                    voice = child_instance.voice
-                    say_str = "say:%s:%s:'%s'" % (engine, voice, text)
-                if not say_str:
-                    continue
-                for x in range(loop):
-                    play_str += '!' + say_str
+            #outbound_socket.log.debug(str(child_instance))
+            if isinstance(child_instance, PlayMany):
+                play_str += PlayMany._roll_play_speak(outbound_socket.save_dir, child_instance.children)
+            elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
+                play_str += PlayMany._roll_play_speak(outbound_socket.save_dir, self.children)
+                break
+
         if self.use_avmd:
             outbound_socket.execute('avmd')
         else:
@@ -1475,6 +1453,72 @@ class Wait(Element):
                                 % str(self.length * 1000)
         outbound_socket.playback(pause_str)
         event = outbound_socket.wait_for_action()
+
+
+class PlayMany(Element):
+
+    def __init__(self):
+        Element.__init__(self)
+        self.nestables = ('Play', 'Speak')
+
+    def execute(self, outbound_socket):
+        play_str = self._roll_play_speak(outbound_socket.save_dir, self.children)
+        outbound_socket.set("playback_sleep_val=0")
+        outbound_socket.set("playback_delimiter=!")
+        outbound_socket.log.debug("Playing %s" % play_str)
+        res = outbound_socket.playback(play_str)
+        if res.is_success():
+            event = outbound_socket.wait_for_action()
+            if event.is_empty():
+                outbound_socket.log.warn("Play Break (empty event)")
+                return
+            outbound_socket.log.debug("Play done (%s)" \
+                    % str(event['Application-Response']))
+        else:
+            outbound_socket.log.error("Play Failed - %s" \
+                            % str(res.get_response()))
+        outbound_socket.log.info("Play Finished")
+        return
+
+    @staticmethod
+    def _roll_play_speak(save_dir, children):
+        play_str = "file_string://silence_stream://1!"
+        for child_instance in children:
+            if isinstance(child_instance, Play):
+                sound_file = child_instance.sound_file_path
+                if sound_file:
+                    sound_file = re_root(sound_file, save_dir)
+                    loop = child_instance.loop_times
+                    if loop == 0:
+                        loop = MAX_LOOPS  # Add a high number to Play infinitely
+                    # Play the file loop number of times
+                    for x in range(loop):
+                        play_str += sound_file + '!'
+            elif isinstance(child_instance, Speak):
+                text = child_instance.text
+                # escape simple quote
+                text = text.replace("'", "\\'")
+                loop = child_instance.loop_times
+                child_type = child_instance.item_type
+                method = child_instance.method
+                say_str = ''
+                if child_type and method:
+                    language = child_instance.language
+                    say_args = "%s.wav %s %s %s '%s'" \
+                                    % (language, language, child_type, method, text)
+                    say_str = "${say_string %s}" % say_args
+                else:
+                    engine = child_instance.engine
+                    voice = child_instance.voice
+                    say_str = "say:%s:%s:'%s'" % (engine, voice, text)
+                if not say_str:
+                    continue
+                for x in range(loop):
+                    play_str += sound_file + '!'
+        if play_str.endswith('!'):
+            play_str = play_str[:-1]
+
+        return play_str
 
 
 class Play(Element):

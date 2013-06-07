@@ -76,6 +76,7 @@ class PlivoOutboundServer(outboundsocket.OutboundServer):
 
             self.default_http_method = config.get('common', 'DEFAULT_HTTP_METHOD', default='')
             self.save_dir = config.get('common', 'UPLOAD_FOLDER', default='/tmp')
+            self.log.info("save_dir: %s" % self.save_dir)
             if not self.default_http_method in ('GET', 'POST'):
                 self.default_http_method = 'POST'
 
