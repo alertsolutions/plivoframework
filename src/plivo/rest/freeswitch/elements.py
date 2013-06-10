@@ -1493,7 +1493,7 @@ class PlayMany(Element):
                 if isinstance(child_instance, Wait):
                     play_str += 'silence_stream://%d!' % (child_instance.length * 1000)
                 else:
-                    play_str = 'silence_stream://1!'
+                    play_str += 'silence_stream://1!'
             if isinstance(child_instance, Play):
                 sound_file = child_instance.sound_file_path
                 if sound_file:
