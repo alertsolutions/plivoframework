@@ -1278,9 +1278,11 @@ class LeaveMessage(Element):
         for child_instance in self.children:
             #outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                play_str += PlayMany._roll_play_speak(outbound_socket.save_dir, child_instance.children)
+                play_str += PlayMany._roll_play_speak(outbound_socket.log, \
+                    outbound_socket.save_dir, child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                play_str += PlayMany._roll_play_speak(outbound_socket.save_dir, self.children)
+                play_str += PlayMany._roll_play_speak(outbound_socket.log, \
+                    outbound_socket.save_dir, self.children)
                 break
 
         if self.use_avmd:
@@ -1459,10 +1461,11 @@ class PlayMany(Element):
 
     def __init__(self):
         Element.__init__(self)
-        self.nestables = ('Play', 'Speak')
+        self.nestables = ('Play', 'Speak', 'Wait')
 
     def execute(self, outbound_socket):
-        play_str = self._roll_play_speak(outbound_socket.save_dir, self.children)
+        play_str = self._roll_play_speak(outbound_socket.log, \
+            outbound_socket.save_dir, self.children)
         outbound_socket.set("playback_sleep_val=0")
         outbound_socket.set("playback_delimiter=!")
         outbound_socket.log.debug("Playing %s" % play_str)
@@ -1481,9 +1484,16 @@ class PlayMany(Element):
         return
 
     @staticmethod
-    def _roll_play_speak(save_dir, children):
-        play_str = "file_string://silence_stream://1!"
+    def _roll_play_speak(log, save_dir, children):
+        play_str = 'file_string://'
+        first = True
         for child_instance in children:
+            log.debug('rolling %s ' % child_instance.name)
+            if first:
+                if isinstance(child_instance, Wait):
+                    play_str += 'silence_stream://%d!' % (child_instance.length * 1000)
+                else:
+                    play_str = 'silence_stream://1!'
             if isinstance(child_instance, Play):
                 sound_file = child_instance.sound_file_path
                 if sound_file:
@@ -1515,6 +1525,8 @@ class PlayMany(Element):
                     continue
                 for x in range(loop):
                     play_str += sound_file + '!'
+            first = False
+            #log.debug('play_str: %s' % play_str)
         if play_str.endswith('!'):
             play_str = play_str[:-1]
 
