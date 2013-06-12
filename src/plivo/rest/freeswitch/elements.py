@@ -1471,7 +1471,13 @@ class PlayMany(Element):
         outbound_socket.log.debug("Playing %s" % play_str)
         res = outbound_socket.playback(play_str)
         if res.is_success():
-            event = outbound_socket.wait_for_action()
+            while True:
+                event = outbound_socket.wait_for_action()
+                # hack to deal with mod_amd's voice_stop() bug
+                if event['Event-Name'] == 'DETECTED_SPEECH':
+                    continue
+                else:
+                    break
             if event.is_empty():
                 outbound_socket.log.warn("Play Break (empty event)")
                 return
