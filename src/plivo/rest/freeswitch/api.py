@@ -20,6 +20,7 @@ from werkzeug.exceptions import Unauthorized
 import gevent.queue
 
 from plivo.utils.files import check_for_wav, mkdir_p, re_root
+from plivo.rest.freeswitch.wavapi import PlivoWavRestApi, auth_protect
 from plivo.rest.freeswitch.helpers import is_valid_url, get_conf_value, \
                                             get_post_param, get_http_param, get_resource, \
                                             normalize_url_space, \
@@ -27,17 +28,6 @@ from plivo.rest.freeswitch.helpers import is_valid_url, get_conf_value, \
 import plivo.rest.freeswitch.elements as elements
 
 MAX_LOOPS = elements.MAX_LOOPS
-
-
-def auth_protect(decorated_func):
-    def wrapper(obj):
-        if obj._validate_http_auth() and obj._validate_ip_auth():
-            return decorated_func(obj)
-    wrapper.__name__ = decorated_func.__name__
-    wrapper.__doc__ = decorated_func.__doc__
-    return wrapper
-
-
 
 class Gateway(object):
     __slots__ = ('__weakref__',
@@ -105,47 +95,7 @@ class CallRequest(object):
                str(self.extra_dial_string))
 
 
-
-class PlivoRestApi(object):
-    _config = None
-    _rest_inbound_socket = None
-    allowed_ips = []
-    key = ''
-    secret = ''
-
-    def _validate_ip_auth(self):
-        """Verify request is from allowed ips
-        """
-        if not self.allowed_ips:
-            return True
-        for ip in self.allowed_ips:
-            if ip.strip() == request.remote_addr.strip():
-                return True
-        raise Unauthorized("IP Auth Failed")
-
-    def _validate_http_auth(self):
-        """Verify http auth request with values in "Authorization" header
-        """
-        if not self.key or not self.secret:
-            return True
-        try:
-            auth_type, encoded_auth_str = \
-                request.headers['Authorization'].split(' ', 1)
-            if auth_type == 'Basic':
-                decoded_auth_str = base64.decodestring(encoded_auth_str)
-                auth_id, auth_token = decoded_auth_str.split(':', 1)
-                if auth_id == self.key and auth_token == self.secret:
-                    return True
-        except (KeyError, ValueError, TypeError):
-            pass
-        raise Unauthorized("HTTP Auth Failed")
-
-    def send_response(self, Success, Message, **kwargs):
-        if Success is True:
-            self._rest_inbound_socket.log.info(Message)
-            return flask.jsonify(Success=True, Message=Message, **kwargs)
-        self._rest_inbound_socket.log.error(Message)
-        return flask.jsonify(Success=False, Message=Message, **kwargs)
+class PlivoRestApi(PlivoWavRestApi):
 
     def _prepare_play_string(self, remote_url):
         sound_files = []

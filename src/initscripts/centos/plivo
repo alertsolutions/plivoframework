@@ -32,93 +32,104 @@ restpid=/usr/local/plivo/tmp/rest-${plivo_config}.pid
 outboundpid=/usr/local/plivo/tmp/outbound-${plivo_config}.pid
 lockfile=/var/lock/subsys/$prog
 
-
 check_state() {
-	declare -i count
-	count=2
-	count=$($exec status |grep "\[$plivo_config\]" |grep -c "not running")
-	return $count
+    declare -i count
+    count=3
+    count=$($exec status |grep "\[$plivo_config\]" |grep -c "not running")
+    return $count
 }
-
 
 start() {
-	[ -x $exec ] || exit 5
+    [ -x $exec ] || exit 5
 
-	# Source config
-        if [ -f /etc/sysconfig/plivo ] ; then
-                . /etc/sysconfig/plivo
-	fi
-	umask 077
+    # Source config
+    if [ -f /etc/sysconfig/plivo ] ; then
+        . /etc/sysconfig/plivo
+    fi
+    umask 077
 
-        echo -n $"Starting $name: "
-        $exec start &>/dev/null 
-	check_state
-        RETVAL=$?
-        if [ $RETVAL -eq 0 ]; then
-		touch $lockfile
-		success	
-	else
-		failure
-	fi
-        echo
-        return $RETVAL
+    echo -n $"Starting $name: "
+    if [ "$1" == "wav" ] ; then
+        arg="--wav"
+        comp=2
+    else
+        arg=''
+        comp=0
+    fi
+    $exec start $arg &> /dev/null 
+    check_state
+    RETVAL=$?
+    if [ $RETVAL -eq $comp ]; then
+        touch $lockfile
+        success    
+    else
+        failure
+    fi
+    echo
+    return $RETVAL
 }
+
 stop() {
-        echo -n $"Shutting down $name: "
-        $exec stop &>/dev/null
-	check_state
-        RETVAL=$?
-        if [ $RETVAL -eq 2 ]; then
-		RETVAL=0
-		rm -f $lockfile
-		success	
-	else
-		failure
-	fi
-        echo
-        return $RETVAL
+    echo -n $"Shutting down $name: "
+    [ "$1" == "wav" ] && arg="--wav" || arg=''
+    $exec stop $arg &> /dev/null 
+    check_state
+    RETVAL=$?
+    if [ $RETVAL -eq 3 ]; then
+        RETVAL=0
+        rm -f $lockfile
+        success    
+    else
+        failure
+    fi
+    echo
+    return $RETVAL
 }
+
 reload()  {
-	echo -n "Reloading $name ..."
-	check_state
-	RETVAL=$?
-	if [ $RETVAL -eq 0 ]; then
-		$exec reload &>/dev/null && success || failure
-	else
-		echo -n " not started ! "
-		failure
-	fi
-	echo
-	return $RETVAL
+    echo -n "Reloading $name ..."
+    check_state
+    RETVAL=$?
+    if [ $RETVAL -eq 0 ]; then
+        $exec reload &>/dev/null && success || failure
+    else
+        echo -n " not started ! "
+        failure
+    fi
+    echo
+    return $RETVAL
 }
+
 rhstatus() {
-	status -p "$restpid" plivo-rest
-	status -p "$outboundpid" plivo-outbound
+    status -p "$restpid" plivo-rest
+    status -p "$outboundpid" plivo-outbound
 }
+
 restart() {
-        stop
-        start
+    stop
+    start
 }
 
 case "$1" in
-  start)
-        start
-        ;;
-  stop)
-        stop
-        ;;
-  restart)
+    start)
+        start $2
+    ;;
+    stop)
+        stop $2
+    ;;
+    restart)
         restart
-        ;;
-  reload)
-	reload
-	;;
-  status)
+    ;;
+    reload)
+        reload
+    ;;
+    status)
         rhstatus
-        ;;
-  *)
+    ;;
+    *)
         echo $"Usage: $0 {start|stop|restart|reload|status}"
         exit 2
+    ;;
 esac
 
 exit $RETVAL

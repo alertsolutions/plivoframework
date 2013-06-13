@@ -16,32 +16,24 @@ import gevent
 from gevent.wsgi import WSGIServer
 from gevent.pywsgi import WSGIServer as PyWSGIServer
 
-from plivo.core.errors import ConnectError
-from plivo.rest.freeswitch.api import PlivoRestApi
-from plivo.rest.freeswitch.inboundsocket import RESTInboundSocket
+from plivo.rest.freeswitch.wavapi import PlivoWavRestApi
 from plivo.rest.freeswitch import urls, helpers
 import plivo.utils.daemonize
 from plivo.utils.logger import StdoutLogger, FileLogger, SysLogger, DummyLogger, HTTPLogger
 
-class PlivoRestServer(PlivoRestApi):
-    """Class PlivoRestServer"""
-    name = 'PlivoRestServer'
+# TODO: all the common stuff between PlivoRestServer and PlivoWavRestServer
+# should be abstracted out into something common
+class PlivoWavRestServer(PlivoWavRestApi):
+    """Class PlivoWavRestServer"""
+    name = 'PlivoWavRestServer'
     default_http_method = 'POST'
 
     def __init__(self, configfile, daemon=False,
-                        pidfile='/tmp/plivo_rest.pid'):
+                        pidfile='/tmp/plivo_wav_rest.pid'):
         """Initialize main properties such as daemon, pidfile, config, etc...
 
         This will init the http server that will provide the Rest interface,
         the rest server is configured on HTTP_ADDRESS
-
-        Extra:
-        * FS_INBOUND_ADDRESS : Define the event_socket interface to connect to
-        in order to initialize CallSession with Freeswitch
-
-        * FS_OUTBOUND_ADDRESS : Define where on which address listen to
-        initialize event_socket session with Freeswitch in order to control
-        new CallSession
 
         """
         self._daemon = daemon
@@ -59,10 +51,8 @@ class PlivoRestServer(PlivoRestApi):
         self.cache = {}
         self.load_config()
 
-        # create inbound socket instance
-        self._rest_inbound_socket = RESTInboundSocket(server=self)
         # expose API functions to flask app
-        for path, func_desc in dict(urls.URLS.items() + urls.WAV_URLS.items()).iteritems():
+        for path, func_desc in urls.WAV_URLS.iteritems():
             func, methods = func_desc
             fn = getattr(self, func.__name__)
             self.app.add_url_rule(path, func.__name__, fn, methods=methods)
@@ -175,19 +165,6 @@ class PlivoRestServer(PlivoRestApi):
                 self.http_host, http_port = self.http_address.split(':', 1)
                 self.http_port = int(http_port)
 
-                self.fs_inbound_address = config.get('rest_server', 'FS_INBOUND_ADDRESS')
-                self.fs_host, fs_port = self.fs_inbound_address.split(':', 1)
-                self.fs_port = int(fs_port)
-
-                self.fs_password = config.get('rest_server', 'FS_INBOUND_PASSWORD')
-
-                # get outbound socket host/port
-                self.fs_out_address = config.get('outbound_server', 'FS_OUTBOUND_ADDRESS')
-                self.fs_out_host, self.fs_out_port  = self.fs_out_address.split(':', 1)
-
-                # if outbound host is 0.0.0.0, send to 127.0.0.1
-                if self.fs_out_host == '0.0.0.0':
-                    self.fs_out_address = '127.0.0.1:%s' % self.fs_out_port
                 # set wsgi mode
                 _wsgi_mode = config.get('rest_server', 'WSGI_MODE', default='wsgi')
                 if _wsgi_mode in ('pywsgi', 'python', 'py'):
@@ -198,35 +175,9 @@ class PlivoRestServer(PlivoRestApi):
                 self._ssl = config.get('rest_server', 'SSL', default='false') == 'true'
                 self._ssl_cert = config.get('rest_server', 'SSL_CERT', default='')
 
-
-            self.default_answer_url = config.get('common', 'DEFAULT_ANSWER_URL')
-
-            self.default_hangup_url = config.get('common', 'DEFAULT_HANGUP_URL', default='')
-
             self.default_http_method = config.get('common', 'DEFAULT_HTTP_METHOD', default='')
             if not self.default_http_method in ('GET', 'POST'):
                 self.default_http_method = 'POST'
-
-            self.extra_fs_vars = config.get('common', 'EXTRA_FS_VARS', default='')
-
-            # get call_heartbeat url
-            self.call_heartbeat_url = config.get('rest_server', 'CALL_HEARTBEAT_URL', default='')
-
-            # get record url
-            self.record_url = config.get('rest_server', 'RECORD_URL', default='')
-
-            # load cache params
-            # load cache params
-            self.cache['url'] = config.get('common', 'CACHE_URL', default='')
-            self.cache['script'] = config.get('common', 'CACHE_SCRIPT', default='')
-            if not self.cache['url'] or not self.cache['script']:
-                self.cache = {}
-
-            # get pid file for reloading outbound server (ugly hack ...)
-            try:
-                self.fs_out_pidfile = self._pidfile.replace('rest-', 'outbound-')
-            except Exception, e:
-                self.fs_out_pidfile = None
 
             # create new logger if reloading
             if reload:
@@ -302,7 +253,7 @@ class PlivoRestServer(PlivoRestApi):
             * connect to Freeswitch via our Inbound Socket interface
             * wait even if it takes forever, ever, ever, evveeerrr...
         """
-        self.log.info("RESTServer starting ...")
+        self.log.info("WAVRESTServer starting ...")
         # catch SIG_TERM
         gevent.signal(signal.SIGTERM, self.sig_term)
         gevent.signal(signal.SIGHUP, self.sig_hup)
@@ -310,43 +261,14 @@ class PlivoRestServer(PlivoRestApi):
         self._run = True
         if self._daemon:
             self.do_daemon()
-        # connection counter
-        retries = 1
-        # start http server
-        self.http_proc = gevent.spawn(self.http_server.serve_forever)
-        if self._ssl:
-            self.log.info("RESTServer started at: 'https://%s'" % self.http_address)
-        else:
-            self.log.info("RESTServer started at: 'http://%s'" % self.http_address)
-        # Start inbound socket
         try:
-            while self._run:
-                try:
-                    self.log.info("Trying to connect to FreeSWITCH at: %s" \
-                                            % self.fs_inbound_address)
-                    self._rest_inbound_socket.connect()
-                    # reset retries when connection is a success
-                    retries = 1
-                    self.log.info("Connected to FreeSWITCH")
-                    # serve forever
-                    self._rest_inbound_socket.serve_forever()
-                except ConnectError, e:
-                    if self._run is False:
-                        break
-                    self.log.error("Connect failed: %s" % str(e))
-                # sleep after connection failure
-                sleep_for = retries * 10
-                self.log.error("Reconnecting in %d seconds" % sleep_for)
-                gevent.sleep(sleep_for)
-                # don't sleep more than 30 secs
-                if retries < 3:
-                    retries += 1
+            self.http_server.serve_forever()
         except (SystemExit, KeyboardInterrupt):
             pass
         # kill http server
-        self.http_proc.kill()
+        self.http_server.kill()
         # finish here
-        self.log.info("RESTServer Exited")
+        self.log.info("WAVRESTServer Exited")
 
 
 def main():
@@ -369,10 +291,9 @@ def main():
         if not os.path.isfile(configfile):
             raise SystemExit("Error : Default config file mising at '%s'. Please specify -c <configfilepath>" %configfile)
     if not pidfile:
-        pidfile='/tmp/plivo_rest.pid'
+        pidfile='/tmp/plivo_wav_rest.pid'
 
-    server = PlivoRestServer(configfile=configfile, pidfile=pidfile,
-                                                        daemon=False)
+    server = PlivoWavRestServer(configfile=configfile, pidfile=pidfile, daemon=False)
     server.start()
 
 
