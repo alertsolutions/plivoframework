@@ -4,6 +4,7 @@
 from gevent import monkey
 monkey.patch_all()
 
+import time
 import base64
 import ConfigParser
 from hashlib import sha1
@@ -406,4 +407,12 @@ def get_grammar_resource(socket, grammar):
         socket.log.error("Grammar Cache Error: %s" % str(e))
     return False
 
+class Stopwatch:
 
+    def __enter__(self):
+        self.start = time.time()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.time()
+        self.elapsed = self.end - self.start
