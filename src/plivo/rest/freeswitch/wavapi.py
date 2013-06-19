@@ -62,14 +62,14 @@ class PlivoWavRestApi(object):
 
     def send_response(self, Success, Message, **kwargs):
         if Success is True:
-            self._rest_inbound_socket.log.info(Message)
+            self.log.info(Message)
             return flask.jsonify(Success=True, Message=Message, **kwargs)
-        self._rest_inbound_socket.log.error(Message)
+        self.log.error(Message)
         return flask.jsonify(Success=False, Message=Message, **kwargs)
 
     @auth_protect
     def save_wav(self):
-        self._rest_inbound_socket.log.debug("RESTAPI SaveWav called")
+        self.log.debug("RESTAPI SaveWav called")
         result = False
         name = get_post_param(request, "WavPath") 
         file = request.files['file']
@@ -82,16 +82,16 @@ class PlivoWavRestApi(object):
             msg = "no file uploaded"
             return self.send_response(Success=result, Message=msg)
         
-        self._rest_inbound_socket.log.debug(str(file))
+        self.log.debug(str(file))
 
         fullpath = re_root(name, self.save_dir)
         pathname = os.path.dirname(fullpath)
-        self._rest_inbound_socket.log.debug("saving %s to disk" % fullpath)
+        self.log.debug("saving %s to disk" % fullpath)
         try:
             mkdir_p(pathname)
             file.save(fullpath)
         except Exception as ex:
-            self._rest_inbound_socket.log.debug("save of %s failed: %s" % (fullpath, str(ex)))
+            self.log.debug("save of %s failed: %s" % (fullpath, str(ex)))
             msg = "failed to save %s" % name
             return self.send_response(Success=result, Message=msg)
 
@@ -105,7 +105,7 @@ class PlivoWavRestApi(object):
 
     @auth_protect
     def check_wav(self):
-        self._rest_inbound_socket.log.debug("RESTAPI CheckWav called")
+        self.log.debug("RESTAPI CheckWav called")
         result = False
         name = get_post_param(request, "WavName") 
 
@@ -125,7 +125,7 @@ class PlivoWavRestApi(object):
 
     @auth_protect
     def get_wav(self):
-        self._rest_inbound_socket.log.debug("RESTAPI GetWav called")
+        self.log.debug("RESTAPI GetWav called")
         result = False
         name = get_post_param(request, "WavName") 
 

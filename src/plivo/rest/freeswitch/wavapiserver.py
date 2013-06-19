@@ -203,7 +203,6 @@ class PlivoWavRestServer(PlivoWavRestApi):
     def reload(self):
         self.log.warn("Reload ...")
         self.load_config(reload=True)
-        self._rest_inbound_socket.log = self.log
         self.log.warn("Reload done")
 
     def do_daemon(self):
@@ -243,7 +242,6 @@ class PlivoWavRestServer(PlivoWavRestApi):
         and close the socket
         """
         self._run = False
-        self._rest_inbound_socket.exit()
 
     def start(self):
         """start method is where we decide to :
