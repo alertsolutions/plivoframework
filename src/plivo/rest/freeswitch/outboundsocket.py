@@ -4,7 +4,6 @@
 from gevent import monkey
 monkey.patch_all()
 
-import time
 import os.path
 import traceback
 try:
@@ -19,7 +18,7 @@ from gevent.event import AsyncResult
 
 from plivo.utils.encode import safe_str
 from plivo.core.freeswitch.eventtypes import Event
-from plivo.rest.freeswitch.helpers import HTTPRequest, get_substring
+from plivo.rest.freeswitch.helpers import HTTPRequest, get_substring, Stopwatch
 from plivo.core.freeswitch.outboundsocket import OutboundEventSocket
 from plivo.rest.freeswitch import elements
 from plivo.rest.freeswitch.exceptions import RESTFormatException, \
@@ -334,7 +333,6 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
 
 
     def _run(self):
-        then = time.time()
         self.connect()
         self.resume()
         # Linger to get all remaining events before closing
@@ -353,8 +351,6 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         self.set('hangup_after_bridge=false')
         channel = self.get_channel()
         self.call_uuid = self.get_channel_unique_id()
-        duration = time.time() - then
-        self.log.debug('channel setup took %d' % duration)
         # Set CallerName to Session Params
         self.session_params['CallerName'] = channel.get_header('Caller-Caller-ID-Name') or ''
         # Set CallUUID to Session Params
@@ -560,8 +556,11 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         xml_response
         """
         self.log.info("Fetching RESTXML from %s" % self.target_url)
-        self.xml_response = self.send_to_url(self.target_url, params, method)
-        self.log.info("Requested RESTXML to %s" % self.target_url)
+        with Stopwatch() as sw:
+            self.xml_response = self.send_to_url(self.target_url, params, method)
+        self.log.info("Requested RESTXML to %s took %f s" % (self.target_url, sw.elapsed))
+        if sw.elapsed > 1:
+            self.log.warn("call to %s took %f s, params: %s" % (self.target_url, sw.elapsed, str(params)))
 
     def send_to_url(self, url=None, params={}, method=None):
         """

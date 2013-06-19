@@ -54,7 +54,7 @@ start() {
         comp=2
     else
         arg=''
-        comp=0
+        comp=1
     fi
     $exec start $arg &> /dev/null 
     check_state
