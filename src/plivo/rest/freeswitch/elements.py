@@ -67,6 +67,13 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'callbackMethod': 'POST',
                 'digitsMatch': ''
         },
+        'GetKeyPresses': {
+                #action: DYNAMIC! MUST BE SET IN METHOD,
+                'method': 'POST',
+                'timeout': 5,
+                'numDigits': 99,
+                'validDigits': '0123456789*#',
+        },
         'GetDigits': {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
                 'method': 'POST',
@@ -162,6 +169,52 @@ ELEMENTS_DEFAULT_PARAMS = {
 
 MAX_LOOPS = 10000
 
+def roll_wait_play_speak(log, save_dir, children):
+    play_str = 'file_string://'
+    first = True
+    for child_instance in children:
+        log.debug('rolling %s ' % child_instance.name)
+        if first:
+            play_str += 'silence_stream://1!'
+        if isinstance(child_instance, Wait):
+            play_str += 'silence_stream://%d!' % (child_instance.length * 1000)
+        if isinstance(child_instance, Play):
+            sound_file = child_instance.sound_file_path
+            if sound_file:
+                sound_file = re_root(sound_file, save_dir)
+                loop = child_instance.loop_times
+                if loop == 0:
+                    loop = MAX_LOOPS  # Add a high number to Play infinitely
+                # Play the file loop number of times
+                for x in range(loop):
+                    play_str += sound_file + '!'
+        elif isinstance(child_instance, Speak):
+            text = child_instance.text
+            # escape simple quote
+            text = text.replace("'", "\\'")
+            loop = child_instance.loop_times
+            child_type = child_instance.item_type
+            method = child_instance.method
+            say_str = ''
+            if child_type and method:
+                language = child_instance.language
+                say_args = "%s.wav %s %s %s '%s'" \
+                                % (language, language, child_type, method, text)
+                say_str = "${say_string %s}" % say_args
+            else:
+                engine = child_instance.engine
+                voice = child_instance.voice
+                say_str = "say:%s:%s:'%s'" % (engine, voice, text)
+            if not say_str:
+                continue
+            for x in range(loop):
+                play_str += sound_file + '!'
+        first = False
+        #log.debug('play_str: %s' % play_str)
+    if play_str.endswith('!'):
+        return play_str[:-1]
+
+    return play_str
 
 class Element(object):
     """Abstract Element Class to be inherited by all other elements"""
@@ -1153,6 +1206,124 @@ class GetDigits(Element):
         # no digits received
         outbound_socket.log.info("GetDigits, No Digits Received")
 
+class GetKeyPresses(Element):
+    """Get digits from the caller's keypad, like GetDigits, but uses
+    different dialplay apps
+
+    action: URL to which the digits entered will be sent
+    method: submit to 'action' url using GET or POST
+    numDigits: how many digits to gather before returning
+    timeout: milliseconds after key(s) pressed before processing happens
+    validDigits: comma-separated digits which are allowed to be pressed
+    invalidDigitsSound: Sound played when invalid digit pressed
+    """
+    DEFAULT_MAX_DIGITS = 99
+    DEFAULT_TIMEOUT = 5
+
+    def __init__(self):
+        Element.__init__(self)
+        self.nestables = ('Speak', 'Play', 'Wait')
+        self.num_digits = None
+        self.timeout = None
+        self.finish_on_key = None
+        self.action = None
+        #self.play_beep = ""
+        self.valid_digits = ""
+        #self.invalid_digits_sound = ""
+        #self.retries = None
+        #self.sound_files = []
+        self.method = ""
+
+    def parse_element(self, element, uri=None):
+        Element.parse_element(self, element, uri)
+        try:
+            num_digits = int(self.extract_attribute_value('numDigits',
+                             self.DEFAULT_MAX_DIGITS))
+        except ValueError:
+            num_digits = self.DEFAULT_MAX_DIGITS
+        if num_digits > self.DEFAULT_MAX_DIGITS:
+            num_digits = self.DEFAULT_MAX_DIGITS
+        if num_digits < 1:
+            raise RESTFormatException(self.name + " 'numDigits' must be greater than 0")
+
+        try:
+            self.timeout = int(self.extract_attribute_value("timeout", self.DEFAULT_TIMEOUT))
+        except ValueError:
+            self.timeout = self.DEFAULT_TIMEOUT
+        if self.timeout < 1:
+            raise RESTFormatException(self.name + " 'timeout' must be a positive integer")
+
+        self.valid_digits = self.extract_attribute_value("validDigits")
+        self.finish_on_key = self.extract_attribute_value("finishOnKey")
+
+        method = self.extract_attribute_value("method")
+        if not method in ('GET', 'POST'):
+            raise RESTAttributeException("method must be 'GET' or 'POST'")
+        self.method = method
+
+        action = self.extract_attribute_value("action")
+        if action and is_valid_url(action):
+            self.action = action
+        else:
+            self.action = None
+        self.num_digits = num_digits
+
+    def execute(self, outbound_socket):
+        play_str = roll_wait_play_speak(outbound_socket.log, \
+            outbound_socket.save_dir, self.children)
+
+        outbound_socket.filter('Event-Name DTMF')
+        outbound_socket.log.info("%s Started %s" % (self.name, play_str))
+        terminator = '' if self.finish_on_key == None else self.finish_on_key + '?'
+        keypress_regex = '^(?:%s)%s$' % (str.replace(self.valid_digits, ',', '|'), terminator)
+        outbound_socket.execute('multiset', \
+            'bind_digit_digit_timeout=%d keypress_regex=%s' % (100, keypress_regex))
+        outbound_socket.execute('bind_digit_action', \
+            'plivo,~^\d+%s$,exec:execute_extension,got_keypress XML plivo' % terminator)
+        #outbound_socket.execute('start_dtmf')
+        outbound_socket.playback(play_str)
+        dtmf_presses = []
+        digits = None
+        while True:
+            event = outbound_socket.wait_for_action()
+
+            if event['Application'] != None and event['Application'] == 'playback':
+                # playback has ended, wait for a key press or timeout
+                if not outbound_socket.has_hangup():
+                    event = outbound_socket.wait_for_action(self.timeout)
+                break
+
+            if event['Event-Name'] == 'CUSTOM' and event['Event-Subclass'] == 'key::press':
+                digits = event['variable_last_matching_digits']
+                self.append_key_press(outbound_socket, digits)
+                break
+
+            if event['Event-Name'] == 'DTMF':
+                self.append_key_press(outbound_socket, event['DTMF-Digit'])
+                continue
+        
+        #outbound_socket.execute('stop_dtmf')
+
+        all_keys = outbound_socket.get_var('plivo_keys_pressed')
+        outbound_socket.log.info('all digits pressed: ' + all_keys)
+
+        if digits is not None:
+            outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, str(digits)))
+            if self.action:
+                # Redirect
+                params = {'Digits': digits}
+                self.fetch_rest_xml(self.action, params, self.method)
+            return
+
+        # no digits received
+        outbound_socket.log.info(self.name + ", No Digits Received")
+
+    def append_key_press(self, sock, kp):
+        pressed_already = sock.get_var('plivo_keys_pressed')
+        nothing_yet = pressed_already is None or pressed_already == ''
+        all_keys = '%s%s' % ('' if nothing_yet else pressed_already + ',', kp)
+        #sock.set('plivo_keys_pressed=' + all_keys)
+        sock.set_var('plivo_keys_pressed', all_keys)
 
 class AnsweringMachineDetect(Element):
     """Detect person or answering machine
@@ -1184,6 +1355,8 @@ class AnsweringMachineDetect(Element):
         self.detect_time = int(self.extract_attribute_value('detectTime', 2000))
 
     def execute(self, outbound_socket):
+        outbound_socket.filter('Event-Name DETECTED_SPEECH')
+        outbound_socket.filter('Event-Name DETECTED_TONE')
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
         outbound_socket.playback('silence_stream://%s' % self.pre_detect_pause)
         outbound_socket.wait_for_action()
@@ -1278,10 +1451,10 @@ class LeaveMessage(Element):
         for child_instance in self.children:
             #outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                play_str += PlayMany._roll_play_speak(outbound_socket.log, \
+                play_str += roll_wait_play_speak(outbound_socket.log, \
                     outbound_socket.save_dir, child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                play_str += PlayMany._roll_play_speak(outbound_socket.log, \
+                play_str += roll_wait_play_speak(outbound_socket.log, \
                     outbound_socket.save_dir, self.children)
                 break
 
@@ -1453,7 +1626,8 @@ class Wait(Element):
                                                     % self.length)
         pause_str = 'file_string://silence_stream://%s'\
                                 % str(self.length * 1000)
-        outbound_socket.playback(pause_str)
+        #outbound_socket.playback(pause_str)
+        outbound_socket.execute('playback', pause_str)
         event = outbound_socket.wait_for_action()
 
 
@@ -1464,10 +1638,9 @@ class PlayMany(Element):
         self.nestables = ('Play', 'Speak', 'Wait')
 
     def execute(self, outbound_socket):
-        play_str = self._roll_play_speak(outbound_socket.log, \
+        play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
-        outbound_socket.set("playback_sleep_val=0")
-        outbound_socket.set("playback_delimiter=!")
+        outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
         outbound_socket.log.debug("Playing %s" % play_str)
         res = outbound_socket.playback(play_str)
         if res.is_success():
@@ -1488,55 +1661,6 @@ class PlayMany(Element):
                             % str(res.get_response()))
         outbound_socket.log.info("Play Finished")
         return
-
-    @staticmethod
-    def _roll_play_speak(log, save_dir, children):
-        play_str = 'file_string://'
-        first = True
-        for child_instance in children:
-            log.debug('rolling %s ' % child_instance.name)
-            if first:
-                if isinstance(child_instance, Wait):
-                    play_str += 'silence_stream://%d!' % (child_instance.length * 1000)
-                else:
-                    play_str += 'silence_stream://1!'
-            if isinstance(child_instance, Play):
-                sound_file = child_instance.sound_file_path
-                if sound_file:
-                    sound_file = re_root(sound_file, save_dir)
-                    loop = child_instance.loop_times
-                    if loop == 0:
-                        loop = MAX_LOOPS  # Add a high number to Play infinitely
-                    # Play the file loop number of times
-                    for x in range(loop):
-                        play_str += sound_file + '!'
-            elif isinstance(child_instance, Speak):
-                text = child_instance.text
-                # escape simple quote
-                text = text.replace("'", "\\'")
-                loop = child_instance.loop_times
-                child_type = child_instance.item_type
-                method = child_instance.method
-                say_str = ''
-                if child_type and method:
-                    language = child_instance.language
-                    say_args = "%s.wav %s %s %s '%s'" \
-                                    % (language, language, child_type, method, text)
-                    say_str = "${say_string %s}" % say_args
-                else:
-                    engine = child_instance.engine
-                    voice = child_instance.voice
-                    say_str = "say:%s:%s:'%s'" % (engine, voice, text)
-                if not say_str:
-                    continue
-                for x in range(loop):
-                    play_str += sound_file + '!'
-            first = False
-            #log.debug('play_str: %s' % play_str)
-        if play_str.endswith('!'):
-            play_str = play_str[:-1]
-
-        return play_str
 
 
 class Play(Element):

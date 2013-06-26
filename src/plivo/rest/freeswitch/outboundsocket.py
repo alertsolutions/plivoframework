@@ -31,7 +31,7 @@ from plivo.rest.freeswitch.exceptions import RESTFormatException, \
 
 MAX_REDIRECT = 9999
 
-EVENTS_FILTER = [ 'CHANNEL_EXECUTE', 'CHANNEL_EXECUTE_COMPLETE', 'CUSTOM',  'DETECTED_SPEECH', 'DETECTED_TONE',  'conference::maintenance', 'plivo::dial' ]
+EVENTS_FILTER = [ 'CHANNEL_EXECUTE', 'CHANNEL_EXECUTE_COMPLETE', 'CUSTOM' ]
 
 class RequestLogger(object):
     """
@@ -219,11 +219,19 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         if self.current_element == 'LeaveMessage':
             self._action_queue.put(event)
 
+    def on_dtmf(self, event):
+        if self.current_element == 'GetKeyPresses':
+            self._action_queue.put(event)
+
     def on_custom(self, event):
         if self.current_element == 'LeaveMessage':
             if event['Event-Subclass'] == 'avmd::beep' \
                 and event['Unique-ID'] == self.get_channel_unique_id():
                 self.log.info('got beep for ' + event['Unique-ID'])
+                self._action_queue.put(event)
+        elif self.current_element == 'GetKeyPresses':
+            if event['Event-Subclass'] == 'key::press':
+                self.log.info('got key press ' + event['variable_last_matching_digits'])
                 self._action_queue.put(event)
         # case conference event
         elif self.current_element == 'Conference':

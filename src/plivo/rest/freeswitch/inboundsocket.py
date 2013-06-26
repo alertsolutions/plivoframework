@@ -599,6 +599,7 @@ class RESTInboundSocket(InboundEventSocket):
             params['Duration'] = event["variable_duration"]
             params['SIPCode'] = event["variable_sip_term_status"]
             params['OriginationUUID'] = event['variable_origination_uuid']
+            params['KeysPressed'] = event['variable_plivo_keys_pressed'] or ''
             spawn_raw(self.send_to_url, hangup_url, params)
 
     def send_to_url(self, url=None, params={}, method=None):
