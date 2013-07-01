@@ -220,7 +220,8 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             self._action_queue.put(event)
 
     def on_dtmf(self, event):
-        if self.current_element == 'GetKeyPresses':
+        if self.current_element == 'GetKeyPresses' \
+            or self.current_element == 'GetDigits':
             self._action_queue.put(event)
 
     def on_custom(self, event):

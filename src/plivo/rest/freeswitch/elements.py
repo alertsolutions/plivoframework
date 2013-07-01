@@ -1193,14 +1193,29 @@ class GetDigits(Element):
                             invalid_file=invalid_sound,
                             valid_digits=self.valid_digits,
                             play_beep=self.play_beep)
-        event = outbound_socket.wait_for_action()
+        event = None
+        last_digit = ''
+        while True:
+            event = outbound_socket.wait_for_action()
+            if event['Event-Name'] == 'DTMF':
+                last_digit = event['DTMF-Digit']
+                continue
+            else:
+                break
+
         digits = outbound_socket.get_var('pagd_input')
+        #terminated = outbound_socket.get_var('read_terminator_used')
+        #outbound_socket.log.info("read_terminator_used -> '%s'" % str(terminated))
+        if digits is None and last_digit == self.finish_on_key:
+            outbound_socket.log.info("terminator '%s' was pressed" % self.finish_on_key)
+            digits = self.finish_on_key
+        
         # digits received
         if digits is not None:
             outbound_socket.log.info("GetDigits, Digits '%s' Received" % str(digits))
             if self.action:
                 # Redirect
-                params = {'Digits': digits}
+                params = { 'Digits': digits }
                 self.fetch_rest_xml(self.action, params, self.method)
             return
         # no digits received
@@ -1278,8 +1293,9 @@ class GetKeyPresses(Element):
         keypress_regex = '^(?:%s)%s$' % (str.replace(self.valid_digits, ',', '|'), terminator)
         outbound_socket.execute('multiset', \
             'bind_digit_digit_timeout=%d keypress_regex=%s' % (100, keypress_regex))
-        outbound_socket.execute('bind_digit_action', \
-            'plivo,~^\d+%s$,exec:execute_extension,got_keypress XML plivo' % terminator)
+        #cmd = 'plivo,~^\d+%s$,exec:execute_extension,got_keypress XML plivo' % terminator
+        cmd = "plivo,~^\d+%s$,exec:event,'Event-Name=CUSTOM,Event-Subclass=key::press'" % terminator
+        outbound_socket.bind_digit_action(cmd)
         #outbound_socket.execute('start_dtmf')
         outbound_socket.playback(play_str)
         dtmf_presses = []
