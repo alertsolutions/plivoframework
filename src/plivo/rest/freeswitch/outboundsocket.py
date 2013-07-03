@@ -175,6 +175,18 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
                 self.log.debug("wait for action end timed out!")
             return Event()
 
+    def get_action_no_wait(self):
+        """
+        get event without blocking
+        """
+        self.log.debug("no wait for action start")
+        try:
+            event = self._action_queue.get_nowait()
+            self.log.debug("wait for action end %s" % str(event))
+            return event
+        except gevent.queue.Empty:
+            return None
+
 
     # In order to "block" the execution of our service until the
     # command is finished, we use a synchronized queue from gevent

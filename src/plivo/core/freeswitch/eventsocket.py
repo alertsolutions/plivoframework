@@ -304,13 +304,13 @@ class EventSocket(Commands):
         if not callback:
             return
         # Calls callback.
+        app, arg = '', ''
         if event['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
             and event['variable_current_application']:
             app = 'App %s' % event['variable_current_application']
-        else:
-            app =''
-        self.log.info('Event-Name %s Unique-ID %s %s' % (event['Event-Name'], \
-            event['uuid'] if event['uuid'] else event['Unique-ID'], app))
+            arg = 'Arg %s' % event['variable_current_application_data']
+        self.log.info('Event-Name %s Unique-ID %s %s %s' % (event['Event-Name'], \
+            event['uuid'] if event['uuid'] else event['Unique-ID'], app, arg))
         try:
             callback(event)
         except:

@@ -416,3 +416,6 @@ class Stopwatch:
     def __exit__(self, *args):
         self.end = time.time()
         self.elapsed = self.end - self.start
+
+    def get_elapsed(self):
+        return time.time() - self.start

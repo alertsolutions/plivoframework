@@ -19,7 +19,7 @@ from plivo.utils.files import mkdir_p, re_root
 from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         file_exists, normalize_url_space, \
                                         get_resource, get_grammar_resource, \
-                                        HTTPRequest
+                                        HTTPRequest, Stopwatch
 
 from plivo.rest.freeswitch.exceptions import RESTFormatException, \
                                             RESTAttributeException, \
@@ -71,8 +71,8 @@ ELEMENTS_DEFAULT_PARAMS = {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
                 'method': 'POST',
                 'timeout': 5,
-                'numDigits': 99,
-                'validDigits': '0123456789*#',
+                'numDigits': 1,
+                'validDigits': '0,1,2,3,4,5,6,7,8,9,*,#',
         },
         'GetDigits': {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
@@ -1232,7 +1232,7 @@ class GetKeyPresses(Element):
     validDigits: comma-separated digits which are allowed to be pressed
     invalidDigitsSound: Sound played when invalid digit pressed
     """
-    DEFAULT_MAX_DIGITS = 99
+    DEFAULT_MAX_DIGITS = 1
     DEFAULT_TIMEOUT = 5
 
     def __init__(self):
@@ -1240,14 +1240,16 @@ class GetKeyPresses(Element):
         self.nestables = ('Speak', 'Play', 'Wait')
         self.num_digits = None
         self.timeout = None
-        self.finish_on_key = None
+        self.finish_on_key = ''
         self.action = None
         #self.play_beep = ""
-        self.valid_digits = ""
+        self.valid_digits = ''
         #self.invalid_digits_sound = ""
         #self.retries = None
         #self.sound_files = []
-        self.method = ""
+        self.method = ''
+        self.dtmfs = ''
+        self.all_keys = ''
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
@@ -1260,6 +1262,7 @@ class GetKeyPresses(Element):
             num_digits = self.DEFAULT_MAX_DIGITS
         if num_digits < 1:
             raise RESTFormatException(self.name + " 'numDigits' must be greater than 0")
+        self.num_digits = num_digits
 
         try:
             self.timeout = int(self.extract_attribute_value("timeout", self.DEFAULT_TIMEOUT))
@@ -1281,65 +1284,91 @@ class GetKeyPresses(Element):
             self.action = action
         else:
             self.action = None
-        self.num_digits = num_digits
 
     def execute(self, outbound_socket):
         play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
 
-        outbound_socket.filter('Event-Name DTMF')
         outbound_socket.log.info("%s Started %s" % (self.name, play_str))
-        terminator = '' if self.finish_on_key == None else self.finish_on_key + '?'
-        keypress_regex = '^(?:%s)%s$' % (str.replace(self.valid_digits, ',', '|'), terminator)
-        outbound_socket.execute('multiset', \
-            'bind_digit_digit_timeout=%d keypress_regex=%s' % (100, keypress_regex))
-        #cmd = 'plivo,~^\d+%s$,exec:execute_extension,got_keypress XML plivo' % terminator
-        cmd = "plivo,~^\d+%s$,exec:event,'Event-Name=CUSTOM,Event-Subclass=key::press'" % terminator
-        outbound_socket.bind_digit_action(cmd)
+        keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
+        self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
+            '' if self.finish_on_key == '' else self.finish_on_key + '?'))
+        outbound_socket.log.debug('key press regex is [ %s ]' % self.keypress_regex.pattern)
         #outbound_socket.execute('start_dtmf')
         outbound_socket.playback(play_str)
-        dtmf_presses = []
-        digits = None
-        while True:
+        valid_press, playback_ended = False, False
+        while not outbound_socket.has_hangup():
             event = outbound_socket.wait_for_action()
+
+            if event['Event-Name'] == 'DTMF':
+                valid_press = self._process_dtmf_event(outbound_socket, event)
+                if valid_press:
+                    break
+                else:
+                    continue
 
             if event['Application'] != None and event['Application'] == 'playback':
                 # playback has ended, wait for a key press or timeout
-                if not outbound_socket.has_hangup():
-                    event = outbound_socket.wait_for_action(self.timeout)
+                playback_ended = True
+                with Stopwatch() as sw:
+                    while not outbound_socket.has_hangup() \
+                        and sw.get_elapsed() < self.timeout:
+                        event = outbound_socket.wait_for_action(self.timeout - sw.get_elapsed())
+                        if event['Event-Name'] == 'DTMF':
+                            valid_press = self._process_dtmf_event(outbound_socket, event)
+                            if valid_press:
+                                break
+                            else:
+                                continue
                 break
-
-            if event['Event-Name'] == 'CUSTOM' and event['Event-Subclass'] == 'key::press':
-                digits = event['variable_last_matching_digits']
-                self.append_key_press(outbound_socket, digits)
-                break
-
-            if event['Event-Name'] == 'DTMF':
-                self.append_key_press(outbound_socket, event['DTMF-Digit'])
-                continue
         
         #outbound_socket.execute('stop_dtmf')
 
-        all_keys = outbound_socket.get_var('plivo_keys_pressed')
-        outbound_socket.log.info('all digits pressed: ' + all_keys)
+        already_pressed = outbound_socket.get_var('plivo_keys_pressed')
+        if len(self.all_keys) > 0: 
+            all_pressed = self._aggregate(already_pressed, ',', self.all_keys)
+            outbound_socket.set_var('plivo_keys_pressed', all_pressed)
+            outbound_socket.log.info('all digits pressed: ' + all_pressed)
+        elif already_pressed and already_pressed != '':
+            outbound_socket.log.info('all digits pressed: ' + already_pressed)
 
-        if digits is not None:
-            outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, str(digits)))
+        if valid_press:
+            outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, self.dtmfs))
             if self.action:
                 # Redirect
-                params = {'Digits': digits}
+                params = { 'Digits': self.dtmfs }
+                if not playback_ended:
+                    # if we killed playback we'll have to wait for the CHANNEL_EXECUTE_COMPLETE event
+                    outbound_socket.api('uuid_break %s all' % outbound_socket.get_channel_unique_id())
+                    playback_event = outbound_socket.wait_for_action(1)
+                    # make sure queue is empty
+                    while outbound_socket.get_action_no_wait() is not None:
+                        pass
                 self.fetch_rest_xml(self.action, params, self.method)
             return
-
         # no digits received
         outbound_socket.log.info(self.name + ", No Digits Received")
 
-    def append_key_press(self, sock, kp):
-        pressed_already = sock.get_var('plivo_keys_pressed')
-        nothing_yet = pressed_already is None or pressed_already == ''
-        all_keys = '%s%s' % ('' if nothing_yet else pressed_already + ',', kp)
-        #sock.set('plivo_keys_pressed=' + all_keys)
-        sock.set_var('plivo_keys_pressed', all_keys)
+    def _process_dtmf_event(self, sock, e):
+        kp = e['DTMF-Digit']
+        self.all_keys = self._aggregate(self.all_keys, ',', kp)
+        self.dtmfs += kp
+        sock.log.debug("captured '%s'" % self.dtmfs)
+        if len(self.dtmfs) == self.num_digits \
+            or kp == self.finish_on_key:
+            valid_press = self.keypress_regex.match(self.dtmfs)
+            if valid_press is not None:
+                return True
+            else:
+                # invalid key press, keep trying
+                self.dtmfs = ''
+                return False
+        else:
+            return False
+
+
+    def _aggregate(self, start, char, append_me):
+        return '%s%s' % ('' if not start else start + char, append_me)
 
 class AnsweringMachineDetect(Element):
     """Detect person or answering machine
@@ -1480,7 +1509,7 @@ class LeaveMessage(Element):
             outbound_socket.execute('start_tone_detect', 'vm_beeps')
 
         i = 0.0
-        while True:
+        while not outbound_socket.has_hangup():
             e = outbound_socket.wait_for_action(0.5)
             i += 0.5
             if self.use_avmd and e['Event-Name'] == 'CUSTOM':
@@ -1660,7 +1689,7 @@ class PlayMany(Element):
         outbound_socket.log.debug("Playing %s" % play_str)
         res = outbound_socket.playback(play_str)
         if res.is_success():
-            while True:
+            while not outbound_socket.has_hangup():
                 event = outbound_socket.wait_for_action()
                 # hack to deal with mod_amd's voice_stop() bug
                 if event['Event-Name'] == 'DETECTED_SPEECH':
