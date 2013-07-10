@@ -735,10 +735,11 @@ class Dial(Element):
         if not remote_url:
             return sound_files
 
-        if not is_valid_url("http"):
+        if not is_valid_url(remote_url):
             outbound_socket.log.info('Assuming %s is a file' % remote_url)
-            if file_exists(remote_url):
-                sound_files.append(re_root(remote_url, outbound_socket.save_dir))
+            local_file = re_root(remote_url, outbound_socket.save_dir)
+            if file_exists(local_file):
+                sound_files.append(local_file)
             else:
                 outbound_socket.log.info('%s does not exist' % remote_url)
             return sound_files
@@ -766,7 +767,7 @@ class Dial(Element):
                             loop = MAX_LOOPS  # Add a high number to Play infinitely
                         # Play the file loop number of times
                         for i in range(loop):
-                            sound_files.append(re_root(sound_file, outbound_socket.save_dir))
+                            sound_files.append(sound_file)
                         # Infinite Loop, so ignore other children
                         if loop == MAX_LOOPS:
                             break
@@ -961,7 +962,7 @@ class Dial(Element):
                 outbound_socket.set("instant_ringback=true")
                 outbound_socket.set("ringback=%s" % play_str)
             else:
-                self.dialmusic = ''
+                self.dial_music = None
         if not self.dial_music:
             outbound_socket.set("bridge_early_media=false")
             outbound_socket.set("instant_ringback=true")
@@ -1313,6 +1314,10 @@ class GetKeyPresses(Element):
                     break
                 else:
                     continue
+            
+            if event['Event-Name'] == 'CHANNEL_HANGUP_COMPLETE':
+                outbound_socket.log.info(self.name + ' got hangup')
+                break
 
             if event['Application'] != None and event['Application'] == 'playback':
                 # playback has ended, wait for a key press or timeout
@@ -1339,7 +1344,7 @@ class GetKeyPresses(Element):
         elif already_pressed and already_pressed != '':
             outbound_socket.log.info('all digits pressed: ' + already_pressed)
 
-        if pr.valid_press:
+        if pr is not None and pr.valid_press:
             outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, self.dtmfs))
             if self.action:
                 # Redirect
