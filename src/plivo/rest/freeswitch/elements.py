@@ -1232,8 +1232,14 @@ class GetKeyPresses(Element):
     validDigits: comma-separated digits which are allowed to be pressed
     invalidDigitsSound: Sound played when invalid digit pressed
     """
-    DEFAULT_MAX_DIGITS = 1
+    DEFAULT_NUM_DIGITS = 6
+    DEFAULT_MAX_DIGITS = 6
     DEFAULT_TIMEOUT = 5
+
+    # result DTO of DTMF processing
+    class PressResult:
+        def __init__(self, **kwargs):
+            self.__dict__ = kwargs
 
     def __init__(self):
         Element.__init__(self)
@@ -1255,11 +1261,11 @@ class GetKeyPresses(Element):
         Element.parse_element(self, element, uri)
         try:
             num_digits = int(self.extract_attribute_value('numDigits',
-                             self.DEFAULT_MAX_DIGITS))
+                             self.DEFAULT_NUM_DIGITS))
         except ValueError:
-            num_digits = self.DEFAULT_MAX_DIGITS
+            num_digits = self.DEFAULT_NUM_DIGITS
         if num_digits > self.DEFAULT_MAX_DIGITS:
-            num_digits = self.DEFAULT_MAX_DIGITS
+            num_digits = self.DEFAULT_NUM_DIGITS
         if num_digits < 1:
             raise RESTFormatException(self.name + " 'numDigits' must be greater than 0")
         self.num_digits = num_digits
@@ -1296,13 +1302,14 @@ class GetKeyPresses(Element):
         outbound_socket.log.debug('key press regex is [ %s ]' % self.keypress_regex.pattern)
         #outbound_socket.execute('start_dtmf')
         outbound_socket.playback(play_str)
-        valid_press, playback_ended = False, False
+        playback_ended = False
+        pr = None
         while not outbound_socket.has_hangup():
             event = outbound_socket.wait_for_action()
 
             if event['Event-Name'] == 'DTMF':
-                valid_press = self._process_dtmf_event(outbound_socket, event)
-                if valid_press:
+                pr = self._process_dtmf_event(outbound_socket, event)
+                if pr.valid_press:
                     break
                 else:
                     continue
@@ -1315,8 +1322,8 @@ class GetKeyPresses(Element):
                         and sw.get_elapsed() < self.timeout:
                         event = outbound_socket.wait_for_action(self.timeout - sw.get_elapsed())
                         if event['Event-Name'] == 'DTMF':
-                            valid_press = self._process_dtmf_event(outbound_socket, event)
-                            if valid_press:
+                            pr = self._process_dtmf_event(outbound_socket, event)
+                            if pr.valid_press:
                                 break
                             else:
                                 continue
@@ -1332,11 +1339,12 @@ class GetKeyPresses(Element):
         elif already_pressed and already_pressed != '':
             outbound_socket.log.info('all digits pressed: ' + already_pressed)
 
-        if valid_press:
+        if pr.valid_press:
             outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, self.dtmfs))
             if self.action:
                 # Redirect
-                params = { 'Digits': self.dtmfs }
+                dtmfs = self.dtmfs if not pr.was_terminated else self.dtmfs[:-1]
+                params = { 'Digits': dtmfs }
                 if not playback_ended:
                     # if we killed playback we'll have to wait for the CHANNEL_EXECUTE_COMPLETE event
                     outbound_socket.api('uuid_break %s all' % outbound_socket.get_channel_unique_id())
@@ -1354,17 +1362,18 @@ class GetKeyPresses(Element):
         self.all_keys = self._aggregate(self.all_keys, ',', kp)
         self.dtmfs += kp
         sock.log.debug("captured '%s'" % self.dtmfs)
-        if len(self.dtmfs) == self.num_digits \
-            or kp == self.finish_on_key:
+        sock.log.debug("dtmf count = %d, max digits = %d" % (len(self.dtmfs), self.num_digits))
+        was_terminated = kp == self.finish_on_key
+        if len(self.dtmfs) == self.num_digits or was_terminated:
             valid_press = self.keypress_regex.match(self.dtmfs)
             if valid_press is not None:
-                return True
+                return GetKeyPresses.PressResult(valid_press = True, was_terminated = was_terminated)
             else:
                 # invalid key press, keep trying
                 self.dtmfs = ''
-                return False
+                return GetKeyPresses.PressResult(valid_press = False, was_terminated = was_terminated)
         else:
-            return False
+            return GetKeyPresses.PressResult(valid_press = False, was_terminated = was_terminated)
 
 
     def _aggregate(self, start, char, append_me):
