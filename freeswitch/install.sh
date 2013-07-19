@@ -16,9 +16,23 @@ FS_BASE_PATH=/usr/local/src/
 CURRENT_PATH=$PWD
 
 git_arg=''
-if [ "$1" == "stable" ] ; then
-    git_arg='-b v1.2.stable'
-fi
+fax_install=false
+while [ "$1" != "" ] ; do
+    case $1 in
+        "-s"|"--stable")
+            git_arg='-b v1.2.stable'
+        ;;
+        "-f"|"--fax")
+            fax_install=true
+        ;;
+        "-h"|"--help")
+            echo "$(basename $0) [ --stable ] [ --fax | --voice ]"
+            echo "install freeswitch (options: use stable branch, install for fax or voice) (default: mainline voice)"
+            exit 0
+        ;;
+    esac
+    shift
+done
 
 # Identify Linux Distribution
 if [ -f /etc/debian_version ] ; then
@@ -83,48 +97,69 @@ esac
 cd $FS_BASE_PATH
 git clone $git_arg $FS_GIT_REPO
 cd $FS_BASE_PATH/freeswitch
-sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH
+[ $(uname -m) == "x86_64" ] && enable_64='--enable-64' || enable_64=''
+sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH $enable_64
 [ -f modules.conf ] && cp modules.conf modules.conf.bak
 sed -i \
--e "s/#applications\/mod_curl/applications\/mod_curl/g" \
--e "s/#applications\/mod_avmd/applications\/mod_avmd/g" \
--e "s/#asr_tts\/mod_flite/asr_tts\/mod_flite/g" \
--e "s/#asr_tts\/mod_pocketsphinx/asr_tts\/mod_pocketsphinx/g" \
--e "s/#asr_tts\/mod_tts_commandline/asr_tts\/mod_tts_commandline/g" \
--e "s/#formats\/mod_shout/formats\/mod_shout/g" \
--e "s/#endpoints\/mod_dingaling/endpoints\/mod_dingaling/g" \
--e "s/#formats\/mod_shell_stream/formats\/mod_shell_stream/g" \
--e "s/#applications\/mod_soundtouch/applications\/mod_soundtouch/g" \
--e "s/#say\/mod_say_de/say\/mod_say_de/g" \
--e "s/#say\/mod_say_es/say\/mod_say_es/g" \
--e "s/#say\/mod_say_fr/say\/mod_say_fr/g" \
--e "s/#say\/mod_say_it/say\/mod_say_it/g" \
--e "s/#say\/mod_say_nl/say\/mod_say_nl/g" \
--e "s/#say\/mod_say_ru/say\/mod_say_ru/g" \
--e "s/#say\/mod_say_zh/say\/mod_say_zh/g" \
--e "s/#say\/mod_say_hu/say\/mod_say_hu/g" \
--e "s/#say\/mod_say_th/say\/mod_say_th/g" \
+-e "s/applications\/mod_sms/#&/g" \
+-e "s/dialplans\/mod_dialplan_asterisk/#&/g" \
 modules.conf
+if $fax_install ; then
+    sed -i \
+    -e "s/#\(languages\/mod_perl\)/\1/g" \
+    modules.conf
+else
+    sed -i \
+    -e "s/#\(applications\/mod_curl\)/\1/g" \
+    -e "s/#\(applications\/mod_avmd\)/\1/g" \
+    -e "s/#\(asr_tts\/mod_flite\)/\1/g" \
+    -e "s/#\(asr_tts\/mod_pocketsphinx\)/\1/g" \
+    -e "s/#\(asr_tts\/mod_tts_commandline\)/\1/g" \
+    -e "s/#\(formats\/mod_shout\)/formats\/\1/g" \
+    -e "s/#\(endpoints\/mod_dingaling\)/\1/g" \
+    -e "s/#\(formats\/mod_shell_stream\)/\1/g" \
+    -e "s/#\(applications\/mod_soundtouch\)/\1/g" \
+    -e "s/#\(say\/mod_say_de\)/\1/g" \
+    -e "s/#\(say\/mod_say_es\)/\1/g" \
+    -e "s/#\(say\/mod_say_fr\)/\1/g" \
+    -e "s/#\(say\/mod_say_it\)/\1/g" \
+    -e "s/#\(say\/mod_say_nl\)/\1/g" \
+    -e "s/#\(say\/mod_say_ru\)/\1/g" \
+    -e "s/#\(say\/mod_say_zh\)/\1/g" \
+    -e "s/#\(say\/mod_say_hu\)/\1/g" \
+    -e "s/#\(say\/mod_say_th\)/\1/g" \
+    modules.conf
+fi
 make && make install && make sounds-install && make moh-install
 
 # Enable FreeSWITCH modules
 cd $FS_INSTALLED_PATH/conf/autoload_configs/
 [ -f modules.conf.xml ] && cp modules.conf.xml modules.conf.xml.bak
-sed -i -r \
--e "s/<\!--\s?<load module=\"mod_xml_cdr\"\/>\s?-->/<load module=\"mod_xml_cdr\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_dingaling\"\/>\s?-->/<load module=\"mod_dingaling\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_shout\"\/>\s?-->/<load module=\"mod_shout\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_tts_commandline\"\/>\s?-->/<load module=\"mod_tts_commandline\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_flite\"\/>\s?-->/<load module=\"mod_flite\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_pocketsphinx\"\/>\s?-->/<load module=\"mod_pocketsphinx\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_soundtouch\"\/>\s?-->/<load module=\"mod_soundtouch\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_say_ru\"\/>\s?-->/<load module=\"mod_say_ru\"\/>/g" \
--e "s/<\!--\s?<load module=\"mod_say_zh\"\/>\s?-->/<load module=\"mod_say_zh\"\/>/g" \
--e 's/mod_say_zh.*$/&\n    <load module="mod_say_de"\/>\n    <load module="mod_say_es"\/>\n    <load module="mod_say_fr"\/>\n    <load module="mod_say_it"\/>\n    <load module="mod_say_nl"\/>\n    <load module="mod_say_hu"\/>\n    <load module="mod_say_th"\/>\n    <load module="mod_avmd"\/>/' \
+sed -i \
+-e "s/<\!--\s?\(<load module=\"mod_xml_cdr\"\/>\)\s?-->/\1/g" \
+-e "s/<load module=\"mod_sms\"\/>/<\!--&-->/g" \
+-e "s/<load module=\"mod_dialplan_asterisk\"\/>/<\!--&-->/g" \
 modules.conf.xml
+if $fax_install ; then
+    sed -i \
+    -e "s/<\!--\s?\(<load module=\"mod_perl\"\/>\)\s?-->/<load module=\"mod_perl\"\/>/g" \
+    modules.conf.xml
+else
+    sed -i \
+    -e "s/<\!--\s?\(<load module=\"mod_dingaling\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_shout\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_tts_commandline\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_flite\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_pocketsphinx\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_soundtouch\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_say_ru\"\/>\)\s?-->/\1/g" \
+    -e "s/<\!--\s?\(<load module=\"mod_say_zh\"\/>\)\s?-->/\1/g" \
+    -e 's/mod_say_zh.*$/&\n    <load module="mod_say_de"\/>\n    <load module="mod_say_es"\/>\n    <load module="mod_say_fr"\/>\n    <load module="mod_say_it"\/>\n    <load module="mod_say_nl"\/>\n    <load module="mod_say_hu"\/>\n    <load module="mod_say_th"\/>\n    <load module="mod_avmd"\/>/' \
+    modules.conf.xml
+fi
 
-sed -i -r \
--e "s/<descriptors>/<descriptors>\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"..\/voicemail_tones\/*.xml\"\/>/g" \
+sed -i \
+-e "s/<descriptors>/&\n\n      <X-PRE-PROCESS cmd=\"include\" data=\"..\/voicemail_tones\/*.xml\"\/>/g" \
 spandsp.conf.xml
 
 # get the conf file with voicemail beep frequencies
@@ -165,6 +200,8 @@ cd $CURRENT_PATH
 [ ! -h /etc/freeswitch ] && ln -s "$FS_INSTALLED_PATH/conf" /etc/freeswitch
 [ ! -h /var/log/freeswitch ] && ln -s "$FS_INSTALLED_PATH/log" /var/log/freeswitch
 [ ! -h /var/run/freeswitch ] && ln -s "$FS_INSTALLED_PATH/run" /var/run/freeswitch
+[ ! -d /var/lib/freeswitch ] && mkdir -p /var/lib/freeswitch
+[ ! -h /var/lib/freeswitch/scripts ] && ln -s "$FS_INSTALLED_PATH/scripts" /var/lib/freeswitch/scripts
 
 # Install Complete
 #clear
