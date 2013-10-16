@@ -1543,6 +1543,7 @@ class LeaveMessage(Element):
                     break
             else: 
                 if e['Event-Name'] == 'DETECTED_TONE':
+                    gevent.sleep(0.25)
                     outbound_socket.wait_for_silence("200 25 0 550")
                     new_e = outbound_socket.wait_for_action()
                     is_silent = new_e['variable_detected_silence'] == 'true'
