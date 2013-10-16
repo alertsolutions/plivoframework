@@ -1227,6 +1227,7 @@ class GetKeyPresses(Element):
     different dialplay apps
 
     action: URL to which the digits entered will be sent
+    no_key: URL to hit when no keys are pressed
     method: submit to 'action' url using GET or POST
     numDigits: how many digits to gather before returning
     timeout: milliseconds after key(s) pressed before processing happens
@@ -1249,6 +1250,7 @@ class GetKeyPresses(Element):
         self.timeout = None
         self.finish_on_key = ''
         self.action = None
+        self.no_key = None
         #self.play_beep = ""
         self.valid_digits = ''
         #self.invalid_digits_sound = ""
@@ -1291,6 +1293,12 @@ class GetKeyPresses(Element):
             self.action = action
         else:
             self.action = None
+
+        no_key = self.extract_attribute_value("no_key")
+        if no_key and is_valid_url(no_key):
+            self.no_key = no_key
+        else:
+            self.no_key = None
 
     def execute(self, outbound_socket):
         play_str = roll_wait_play_speak(outbound_socket.log, \
@@ -1361,6 +1369,8 @@ class GetKeyPresses(Element):
             return
         # no digits received
         outbound_socket.log.info(self.name + ", No Digits Received")
+        if self.no_key is not None:
+            self.fetch_rest_xml(self.no_key, { }, self.method)
 
     def _process_dtmf_event(self, sock, e):
         kp = e['DTMF-Digit']
