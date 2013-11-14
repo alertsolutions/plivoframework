@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 # FreeSWITCH Installation script for CentOS 5.5/5.6
 # and Debian based distros (Debian 5.0 , Ubuntu 10.04 and above)
@@ -16,7 +16,7 @@ FS_BASE_PATH=/usr/local/src/
 CURRENT_PATH=$PWD
 
 git_arg=''
-fax_install=false
+rev='x'
 while [ "$1" != "" ] ; do
     case $1 in
         "-s"|"--stable")
@@ -24,6 +24,10 @@ while [ "$1" != "" ] ; do
         ;;
         "-f"|"--fax")
             fax_install=true
+        ;;
+        "-r"|"--rev")
+            shift
+            rev=$1
         ;;
         "-h"|"--help")
             echo "$(basename $0) [ --stable ] [ --fax | --voice ]"
@@ -97,6 +101,9 @@ esac
 cd $FS_BASE_PATH
 git clone $git_arg $FS_GIT_REPO
 cd $FS_BASE_PATH/freeswitch
+if [ "$rev" != "x" ] ; then
+    git reset --hard $rev
+fi
 [ $(uname -m) == "x86_64" ] && enable_64='--enable-64' || enable_64=''
 sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH $enable_64
 [ -f modules.conf ] && cp modules.conf modules.conf.bak
