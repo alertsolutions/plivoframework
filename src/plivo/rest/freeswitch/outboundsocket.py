@@ -182,7 +182,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         self.log.debug("no wait for action start")
         try:
             event = self._action_queue.get_nowait()
-            self.log.debug("wait for action end %s" % str(event))
+            self.log.debug("no wait for action end %s" % str(event))
             return event
         except gevent.queue.Empty:
             return None
@@ -241,10 +241,6 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             if event['Event-Subclass'] == 'avmd::beep' \
                 and event['Unique-ID'] == self.get_channel_unique_id():
                 self.log.info('got beep for ' + event['Unique-ID'])
-                self._action_queue.put(event)
-        elif self.current_element == 'GetKeyPresses':
-            if event['Event-Subclass'] == 'key::press':
-                self.log.info('got key press ' + event['variable_last_matching_digits'])
                 self._action_queue.put(event)
         # case conference event
         elif self.current_element == 'Conference':
