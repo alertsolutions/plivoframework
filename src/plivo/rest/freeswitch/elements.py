@@ -1527,8 +1527,9 @@ class LeaveMessage(Element):
                     outbound_socket.save_dir, self.children)
                 break
 
+        guid = outbound_socket.get_channel_unique_id()
+
         #todo: remove
-        #guid = outbound_socket.get_channel_unique_id()
         #record_file = '/tmp/' + guid + '.wav'
         #outbound_socket.set("RECORD_STEREO=true")
         #outbound_socket.api("uuid_record %s start %s" %  (guid, record_file))
