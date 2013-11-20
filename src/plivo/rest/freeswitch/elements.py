@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) 2011 Plivo Team. See LICENSE for details.
 
-
+import time
 import os
 import os.path
 from datetime import datetime
@@ -1527,42 +1527,87 @@ class LeaveMessage(Element):
                     outbound_socket.save_dir, self.children)
                 break
 
+        #todo: remove
+        #guid = outbound_socket.get_channel_unique_id()
+        #record_file = '/tmp/' + guid + '.wav'
+        #outbound_socket.set("RECORD_STEREO=true")
+        #outbound_socket.api("uuid_record %s start %s" %  (guid, record_file))
+        #end todo
+
         if self.use_avmd:
             outbound_socket.execute('avmd')
         else:
-            outbound_socket.execute('start_tone_detect', 'vm_beeps')
+            outbound_socket.execute('start_tone_detect', 'vm_beeps', guid, False)
 
+        restart_msg = False
+        beeped = False
+        paused = False
+        outbound_socket.playback(play_str, '!', guid, False)
         i = 0.0
         while not outbound_socket.has_hangup():
-            e = outbound_socket.wait_for_action(0.5)
-            i += 0.5
+            with Stopwatch() as sw:
+                e = outbound_socket.wait_for_action(0.5)
+                i += sw.get_elapsed()
+            if paused:
+                pause_dur = time.time() - paused_time
+                if pause_dur >= 2.0: # unpause
+                    outbound_socket.api('uuid_fileman %s pause' % guid)
+                    paused = False
+            if beeped:
+                since_beep = time.time() - beep_time
+                beeped = since_beep < 1.0
+                outbound_socket.log.info('beeped %s -> %s' % (str(True), str(beeped)))
             if self.use_avmd and e['Event-Name'] == 'CUSTOM':
                 if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
-                    #outbound_socket.log.info('beep event: %s' % str(e))
                     outbound_socket.wait_for_action() # pop off the most recent playback event
                     break
-            else: 
-                if e['Event-Name'] == 'DETECTED_TONE':
-                    gevent.sleep(0.25)
-                    outbound_socket.wait_for_silence("200 25 0 550")
-                    new_e = outbound_socket.wait_for_action()
-                    is_silent = new_e['variable_detected_silence'] == 'true'
-                    if is_silent:
-                        outbound_socket.log.info("detected silence")
+            elif e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
+                and e['Application'] == 'playback':
+                outbound_socket.playback(play_str, '!', guid, False)
+            elif e['Event-Name'] == 'DETECTED_TONE':
+                tone_name = e['Detected-Tone']
+                outbound_socket.log.info('got ' + tone_name)
+                if not paused:
+                    # pause playback while waiting for silence
+                    outbound_socket.api('uuid_fileman %s pause' % guid)
+                    paused = True
+                    paused_time = time.time()
+                if tone_name != 'SILENCE':
+                    beeped = True
+                    beep_time = time.time()
+                if tone_name == 'SILENCE':
+                    if beeped:
+                        outbound_socket.log.info('got silence after beep ' + last_tone)
+                        restart_msg = True
                         break
-                    i += 0.55
+                    beeped = False
+                last_tone = tone_name
 
             if i > self.wait_for_beep:
-                outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (e['Unique-ID'], self.wait_for_beep))
+                outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, i))
                 break
 
         if self.use_avmd:
             outbound_socket.execute('avmd', 'stop')
         else:
             outbound_socket.execute('stop_tone_detect')
-        outbound_socket.set('playback_delimiter=!')
+
+        if restart_msg:
+            outbound_socket.execute('break', 'all')
+
+        # wait for most recent playback, which either just "broke" or is still playing
+        self.playback_wait(outbound_socket) 
+
+        # play again! why not?
         outbound_socket.playback(play_str)
-        outbound_socket.wait_for_action()
+        self.playback_wait(outbound_socket)
+
+        #outbound_socket.api("uuid_record %s stop %s" %  (guid, record_file))
+
+    def playback_wait(self, outbound_socket):
+        f = outbound_socket.wait_for_action()
+        while f['Application'] is None or f['Application'] != 'playback':
+            f = outbound_socket.wait_for_action()
 
 class Hangup(Element):
     """Hangup the call
