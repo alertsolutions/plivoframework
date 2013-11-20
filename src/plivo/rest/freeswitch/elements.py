@@ -1540,20 +1540,13 @@ class LeaveMessage(Element):
         else:
             outbound_socket.execute('start_tone_detect', 'vm_beeps', guid, False)
 
-        restart_msg = False
-        beeped = False
-        paused = False
+        restart_msg = beeped = paused = just_paused = False
         outbound_socket.playback(play_str, '!', guid, False)
         i = 0.0
         while not outbound_socket.has_hangup():
             with Stopwatch() as sw:
                 e = outbound_socket.wait_for_action(0.5)
                 i += sw.get_elapsed()
-            if paused:
-                pause_dur = time.time() - paused_time
-                if pause_dur >= 2.0: # unpause
-                    outbound_socket.api('uuid_fileman %s pause' % guid)
-                    paused = False
             if beeped:
                 since_beep = time.time() - beep_time
                 beeped = since_beep < 1.0
@@ -1570,8 +1563,10 @@ class LeaveMessage(Element):
                 outbound_socket.log.info('got ' + tone_name)
                 if not paused:
                     # pause playback while waiting for silence
+                    outbound_socket.log.info('pause ' + guid)
                     outbound_socket.api('uuid_fileman %s pause' % guid)
                     paused = True
+                    just_paused = True
                     paused_time = time.time()
                 if tone_name != 'SILENCE':
                     beeped = True
@@ -1583,6 +1578,14 @@ class LeaveMessage(Element):
                         break
                     beeped = False
                 last_tone = tone_name
+            if paused and not just_paused:
+                pause_dur = time.time() - paused_time
+                if pause_dur >= 2.0 and not beeped: # unpause
+                    outbound_socket.log.info('unpause %s after %s' % (guid, pause_dur))
+                    outbound_socket.api('uuid_fileman %s pause' % guid)
+                    pause_dur = 0
+                    paused = False
+            just_paused = False
 
             if i > self.wait_for_beep:
                 outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, i))
