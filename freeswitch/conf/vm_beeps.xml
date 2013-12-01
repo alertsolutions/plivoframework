@@ -12,5 +12,8 @@
     <tone name="ATT_VM">
       <element freq1="850" freq2="0" min="350" max="450" />
     </tone>
+    <tone name="SILENCE">
+      <element freq1="0" freq2="0" min="600" max="750" />
+    </tone>
   </descriptor>
 </include>
