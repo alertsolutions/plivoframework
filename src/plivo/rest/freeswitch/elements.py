@@ -1504,12 +1504,13 @@ class LeaveMessage(Element):
     def __init__(self):
         Element.__init__(self)
         self.nestables = ('Speak', 'Play', 'Hangup', 'PlayMany')
-        self.wait_for_beep = 3
+        self.wait_for_beep = 30
         self.use_avmd = True
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
-        self.wait_for_beep = int(self.extract_attribute_value('waitForBeep', 3))
+        #self.wait_for_beep = int(self.extract_attribute_value('waitForBeep', 30))
+        self.wait_for_beep = 30
         detect_type = self.extract_attribute_value('detectType', 'avmd')
         if detect_type not in ('avmd', 'spandsp'):
             raise RESTFormatException("valid 'detectType values are 'avmd' or 'spandsp'")
@@ -1600,7 +1601,8 @@ class LeaveMessage(Element):
             outbound_socket.execute('break', 'all')
 
         # wait for most recent playback, which either just "broke" or is still playing
-        self.playback_wait(outbound_socket) 
+        if not self.playback_wait(outbound_socket):
+            return
 
         # play again! why not?
         outbound_socket.playback(play_str)
@@ -1608,10 +1610,16 @@ class LeaveMessage(Element):
 
         #outbound_socket.api("uuid_record %s stop %s" %  (guid, record_file))
 
-    def playback_wait(self, outbound_socket):
-        f = outbound_socket.wait_for_action()
-        while f['Application'] is None or f['Application'] != 'playback':
-            f = outbound_socket.wait_for_action()
+    def playback_wait(self, outbound_socket, timeout=300):
+        with Stopwatch() as sw:
+            f = outbound_socket.wait_for_action(5)
+            while (f['Application'] is None or f['Application'] != 'playback') \
+                and (not outbound_socket.has_hangup() and sw.get_elapsed() < timeout):
+                f = outbound_socket.wait_for_action(5)
+            if sw.get_elapsed() >= timeout:
+                outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
+                return False
+        return True
 
 class Hangup(Element):
     """Hangup the call

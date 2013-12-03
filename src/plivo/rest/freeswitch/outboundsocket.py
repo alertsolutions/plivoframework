@@ -31,7 +31,7 @@ from plivo.rest.freeswitch.exceptions import RESTFormatException, \
 
 MAX_REDIRECT = 9999
 
-EVENTS_FILTER = [ 'CHANNEL_EXECUTE', 'CHANNEL_EXECUTE_COMPLETE', 'CUSTOM' ]
+EVENTS_FILTER = [ 'CHANNEL_EXECUTE', 'CHANNEL_EXECUTE_COMPLETE', 'CUSTOM', 'CHANNEL_HANGUP_COMPLETE' ]
 
 class RequestLogger(object):
     """
