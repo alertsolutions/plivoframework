@@ -1425,7 +1425,6 @@ class AnsweringMachineDetect(Element):
 
     def execute(self, outbound_socket):
         outbound_socket.filter('Event-Name DETECTED_SPEECH')
-        outbound_socket.filter('Event-Name DETECTED_TONE')
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
         outbound_socket.playback('silence_stream://%s' % self.pre_detect_pause)
         outbound_socket.wait_for_action()
@@ -1517,6 +1516,7 @@ class LeaveMessage(Element):
         self.use_avmd = detect_type == 'avmd'
 
     def execute(self, outbound_socket):
+        outbound_socket.filter('Event-Name DETECTED_TONE')
         play_str = ''
         for child_instance in self.children:
             #outbound_socket.log.debug(str(child_instance))
@@ -1552,6 +1552,7 @@ class LeaveMessage(Element):
                 since_beep = time.time() - beep_time
                 beeped = since_beep < 1.0
                 outbound_socket.log.info('beeped %s -> %s' % (str(True), str(beeped)))
+                #outbound_socket.api('beeped %s -> %s' % (str(True), str(beeped)))
             if self.use_avmd and e['Event-Name'] == 'CUSTOM':
                 if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
                     outbound_socket.wait_for_action() # pop off the most recent playback event
@@ -1562,6 +1563,7 @@ class LeaveMessage(Element):
             elif e['Event-Name'] == 'DETECTED_TONE':
                 tone_name = e['Detected-Tone']
                 outbound_socket.log.info('got ' + tone_name)
+                #outbound_socket.api('log info got ' + tone_name)
                 if not paused:
                     # pause playback while waiting for silence
                     outbound_socket.log.info('pause ' + guid)
