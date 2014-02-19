@@ -1343,6 +1343,9 @@ class GetKeyPresses(Element):
                 break
         
         #outbound_socket.execute('stop_dtmf')
+        if outbound_socket.has_hangup():
+            outbound_socket.log.info("hangup waiting for key press")
+            return
 
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
@@ -1436,7 +1439,8 @@ class AnsweringMachineDetect(Element):
         total_pause = 0
         amd_status = None
         amd_result = None
-        while amd_status is None and total_pause <= self.detect_time:
+        while amd_status is None and total_pause <= self.detect_time \
+            and not outbound_socket.has_hangup():
             event = outbound_socket.wait_for_action(0.25)
             total_pause += pause_incr
             if event['Event-Name'] is not None:
@@ -1490,6 +1494,11 @@ class AnsweringMachineDetect(Element):
         outbound_socket.log.info("amd_status: %s for %s" % (amd_status, call_uuid))
         outbound_socket.log.info("amd_result: %s for %s" % (amd_result, call_uuid))
         outbound_socket.api("log info amd_status: %s, amd_result: %s\n" % (amd_status, amd_result))
+
+        if outbound_socket.has_hangup():
+            outbound_socket.log.info("hangup during auto detection")
+            return
+
         params = {
             'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
             'CallUUID': call_uuid,
