@@ -509,7 +509,9 @@ class PlivoRestApi(PlivoWavRestApi):
         gw = get_post_param(request, 'Gateways')
         answer_url = get_post_param(request, 'AnswerUrl')
 
-        if not caller_id or not to or not gw or not answer_url:
+        if not self._rest_inbound_socket.get_server().connected:
+            msg = "FreeSWITCH disconnected"
+        elif not caller_id or not to or not gw or not answer_url:
             msg = "Mandatory Parameters Missing"
         elif not is_valid_url(answer_url):
             msg = "AnswerUrl is not Valid"

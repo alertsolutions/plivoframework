@@ -51,6 +51,7 @@ class PlivoRestServer(PlivoRestApi):
         self._wsgi_mode = WSGIServer
         self._ssl_cert = None
         self._ssl = False
+        self.connected = False
         # create flask app
         self.app = Flask(self.name)
 
@@ -325,6 +326,7 @@ class PlivoRestServer(PlivoRestApi):
                     self.log.info("Trying to connect to FreeSWITCH at: %s" \
                                             % self.fs_inbound_address)
                     self._rest_inbound_socket.connect()
+                    self.connected = True
                     # reset retries when connection is a success
                     retries = 1
                     self.log.info("Connected to FreeSWITCH")
@@ -341,13 +343,36 @@ class PlivoRestServer(PlivoRestApi):
                 # don't sleep more than 30 secs
                 if retries < 3:
                     retries += 1
+                elif retries >= 3:
+                    self.connected = False
+                    self.hangup_all()
         except (SystemExit, KeyboardInterrupt):
+            pass
+        except Exception, e:
+            self.log.error(str(e))
             pass
         # kill http server
         self.http_proc.kill()
         # finish here
         self.log.info("RESTServer Exited")
 
+    def hangup_all(self):
+        self.log.warn('hanging up all in flight calls')
+        keys = self._rest_inbound_socket.call_requests.keys()
+        for request_uuid in keys:
+            call_req = self._rest_inbound_socket.call_requests[request_uuid]
+            self.log.warn("hanging up request %s" % request_uuid)
+            params = dict([ \
+                ('RequestUUID', request_uuid), \
+                ('Duration', '0'), \
+                ('HangupCause', 'FreeSWITCH disconnected') \
+            ])
+            response = self._rest_inbound_socket.send_to_url(call_req.hangup_url, params, method='POST')
+            if response is None:
+                self.log.warn("problem hanging up request %s" % request_uuid)
+                continue
+            self._rest_inbound_socket.call_requests[request_uuid] = None
+            del self._rest_inbound_socket.call_requests[request_uuid]
 
 def main():
     parser = optparse.OptionParser()
