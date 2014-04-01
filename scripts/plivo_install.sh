@@ -189,7 +189,9 @@ virtualenv --no-site-packages $REAL_PATH
 source $REAL_PATH/bin/activate
 
 # force installation of gevent 1.03a
-pip install --upgrade -f http://gevent.googlecode.com/files/gevent-1.0a3.tar.gz gevent
+# pip install --upgrade -f http://gevent.googlecode.com/files/gevent-1.0a3.tar.gz gevent
+pip uninstall gevent
+pip install -Iv http://gevent.googlecode.com/files/gevent-1.0a3.tar.gz
 
 pip install -e git+${PLIVO_GIT_REPO}@${BRANCH}#egg=plivo
 
