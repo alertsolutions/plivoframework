@@ -38,9 +38,22 @@ class StartDetecting(BeepState):
     def run(self, e):
         if self.info.use_avmd:
             self.outbound_socket.execute('avmd')
-        else:
-            self.outbound_socket.execute('start_tone_detect', 'vm_beeps', self.info.guid, False)
+            return DetectingBeepAVMD(self)
+
+        self.outbound_socket.execute('start_tone_detect', 'vm_beeps', self.info.guid, False)
         return DetectingBeep(self)
+
+class DetectingBeepAVMD(BeepState):
+    def __init__(self, last_state):
+        BeepState.__init__(self, last_state)
+
+    def run(self, e):
+        if self.info.use_avmd and e['Event-Name'] == 'CUSTOM':
+            if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
+                self.outbound_socket.wait_for_action() # pop off the most recent playback event
+                self.info.got_beep = True
+                return StopDetection(self).run(None)
+        return self
 
 class DetectingBeep(BeepState):
     def __init__(self, last_state):

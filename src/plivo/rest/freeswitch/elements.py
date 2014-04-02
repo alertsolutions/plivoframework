@@ -1307,7 +1307,6 @@ class GetKeyPresses(Element):
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
             '' if self.finish_on_key == '' else self.finish_on_key + '?'))
         outbound_socket.log.debug('key press regex is [ %s ]' % self.keypress_regex.pattern)
-        #outbound_socket.execute('start_dtmf')
         outbound_socket.playback(play_str)
         playback_ended = False
         pr = None
@@ -1318,8 +1317,7 @@ class GetKeyPresses(Element):
                 pr = self._process_dtmf_event(outbound_socket, event)
                 if pr.valid_press:
                     break
-            
-            if event['Event-Name'] == 'CHANNEL_HANGUP_COMPLETE':
+            elif event['Event-Name'] == 'CHANNEL_HANGUP_COMPLETE':
                 outbound_socket.log.info(self.name + ' got hangup')
                 break
 
@@ -1336,8 +1334,6 @@ class GetKeyPresses(Element):
                                 break
                 break
         
-        #outbound_socket.execute('stop_dtmf')
-
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
             all_pressed = self._aggregate(already_pressed, ',', self.all_keys)
@@ -1346,6 +1342,12 @@ class GetKeyPresses(Element):
         elif already_pressed and already_pressed != '':
             outbound_socket.log.info('all digits pressed: ' + already_pressed)
 
+        # no digits received
+        outbound_socket.log.info(self.name + ", No Digits Received")
+        if self.no_key is not None:
+            self.fetch_rest_xml(self.no_key, { }, self.method)
+
+        # got a valid dtmf
         if pr is not None and pr.valid_press:
             outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, self.dtmfs))
             if self.action:
@@ -1360,11 +1362,6 @@ class GetKeyPresses(Element):
                     while outbound_socket.get_action_no_wait() is not None:
                         pass
                 self.fetch_rest_xml(self.action, params, self.method)
-            return
-        # no digits received
-        outbound_socket.log.info(self.name + ", No Digits Received")
-        if self.no_key is not None:
-            self.fetch_rest_xml(self.no_key, { }, self.method)
 
     def _process_dtmf_event(self, sock, e):
         kp = e['DTMF-Digit']
@@ -1555,11 +1552,8 @@ class LeaveMessage(Element):
             with Stopwatch() as sw:
                 e = outbound_socket.wait_for_action(0.5)
                 elapsed_time += sw.get_elapsed()
-            if self.use_avmd and e['Event-Name'] == 'CUSTOM':
-                if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
-                    outbound_socket.wait_for_action() # pop off the most recent playback event
-                    break
-            elif e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
+
+            if e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
                 and e['Application'] == 'playback':
                 outbound_socket.playback(play_str, '!', guid, False)
             else:
