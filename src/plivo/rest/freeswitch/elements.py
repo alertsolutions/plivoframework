@@ -21,6 +21,8 @@ from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         get_resource, get_grammar_resource, \
                                         HTTPRequest, Stopwatch
 
+from plivo.rest.freeswitch.beep_detector import *
+
 from plivo.rest.freeswitch.exceptions import RESTFormatException, \
                                             RESTAttributeException, \
                                             RESTRedirectException, \
@@ -1251,11 +1253,7 @@ class GetKeyPresses(Element):
         self.finish_on_key = ''
         self.action = None
         self.no_key = None
-        #self.play_beep = ""
         self.valid_digits = ''
-        #self.invalid_digits_sound = ""
-        #self.retries = None
-        #self.sound_files = []
         self.method = ''
         self.dtmfs = ''
         self.all_keys = ''
@@ -1320,8 +1318,6 @@ class GetKeyPresses(Element):
                 pr = self._process_dtmf_event(outbound_socket, event)
                 if pr.valid_press:
                     break
-                else:
-                    continue
             
             if event['Event-Name'] == 'CHANNEL_HANGUP_COMPLETE':
                 outbound_socket.log.info(self.name + ' got hangup')
@@ -1338,8 +1334,6 @@ class GetKeyPresses(Element):
                             pr = self._process_dtmf_event(outbound_socket, event)
                             if pr.valid_press:
                                 break
-                            else:
-                                continue
                 break
         
         #outbound_socket.execute('stop_dtmf')
@@ -1535,68 +1529,13 @@ class LeaveMessage(Element):
         #outbound_socket.api("uuid_record %s start %s" %  (guid, record_file))
         #end todo
 
-        if self.use_avmd:
-            outbound_socket.execute('avmd')
-        else:
-            outbound_socket.execute('start_tone_detect', 'vm_beeps', guid, False)
+        beep_detector = BeepDetector(outbound_socket, self.use_avmd, guid)
+        beep_detector.start()
+        self.play_and_wait_for_beep(outbound_socket, play_str, beep_detector, guid)
+        stop_state = beep_detector.stop()
 
-        restart_msg = beeped = paused = just_paused = False
-        outbound_socket.playback(play_str, '!', guid, False)
-        i = 0.0
-        while not outbound_socket.has_hangup():
-            with Stopwatch() as sw:
-                e = outbound_socket.wait_for_action(0.5)
-                i += sw.get_elapsed()
-            if beeped:
-                since_beep = time.time() - beep_time
-                beeped = since_beep < 1.0
-                outbound_socket.log.info('beeped %s -> %s' % (str(True), str(beeped)))
-            if self.use_avmd and e['Event-Name'] == 'CUSTOM':
-                if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
-                    outbound_socket.wait_for_action() # pop off the most recent playback event
-                    break
-            elif e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
-                and e['Application'] == 'playback':
-                outbound_socket.playback(play_str, '!', guid, False)
-            elif e['Event-Name'] == 'DETECTED_TONE':
-                tone_name = e['Detected-Tone']
-                outbound_socket.log.info('got ' + tone_name)
-                if not paused:
-                    # pause playback while waiting for silence
-                    outbound_socket.log.info('pause ' + guid)
-                    outbound_socket.api('uuid_fileman %s pause' % guid)
-                    paused = True
-                    just_paused = True
-                    paused_time = time.time()
-                if tone_name != 'SILENCE':
-                    beeped = True
-                    beep_time = time.time()
-                if tone_name == 'SILENCE':
-                    if beeped:
-                        outbound_socket.log.info('got silence after beep ' + last_tone)
-                        restart_msg = True
-                        break
-                    beeped = False
-                last_tone = tone_name
-            if paused and not just_paused:
-                pause_dur = time.time() - paused_time
-                if pause_dur >= 2.0 and not beeped: # unpause
-                    outbound_socket.log.info('unpause %s after %s' % (guid, pause_dur))
-                    outbound_socket.api('uuid_fileman %s pause' % guid)
-                    pause_dur = 0
-                    paused = False
-            just_paused = False
-
-            if i > self.wait_for_beep:
-                outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, i))
-                break
-
-        if self.use_avmd:
-            outbound_socket.execute('avmd', 'stop')
-        else:
-            outbound_socket.execute('stop_tone_detect')
-
-        if restart_msg:
+        if stop_state.info.got_beep:
+            outbound_socket.log.info('detected VM tone: ' + stop_state.info.beep_tone_name)
             outbound_socket.execute('break', 'all')
 
         # wait for most recent playback, which either just "broke" or is still playing
@@ -1606,7 +1545,30 @@ class LeaveMessage(Element):
         outbound_socket.playback(play_str)
         self.playback_wait(outbound_socket)
 
+        #todo: remove
         #outbound_socket.api("uuid_record %s stop %s" %  (guid, record_file))
+
+    def play_and_wait_for_beep(self, outbound_socket, play_str, beep_detector, guid):
+        outbound_socket.playback(play_str, '!', guid, False)
+        elapsed_time = 0.0
+        while not outbound_socket.has_hangup():
+            with Stopwatch() as sw:
+                e = outbound_socket.wait_for_action(0.5)
+                elapsed_time += sw.get_elapsed()
+            if self.use_avmd and e['Event-Name'] == 'CUSTOM':
+                if e['Event-Subclass'] is not None and e['Event-Subclass'] == 'avmd::beep':
+                    outbound_socket.wait_for_action() # pop off the most recent playback event
+                    break
+            elif e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
+                and e['Application'] == 'playback':
+                outbound_socket.playback(play_str, '!', guid, False)
+            else:
+                if isinstance(beep_detector.run(e), Stopped):
+                    break
+
+            if elapsed_time > self.wait_for_beep:
+                outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, elapsed_time))
+                break
 
     def playback_wait(self, outbound_socket):
         f = outbound_socket.wait_for_action()
