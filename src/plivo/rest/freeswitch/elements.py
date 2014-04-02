@@ -69,6 +69,9 @@ ELEMENTS_DEFAULT_PARAMS = {
                 'callbackMethod': 'POST',
                 'digitsMatch': ''
         },
+        'BreakOnAnsweringMachine' : {
+                #action: DYNAMIC! MUST BE SET IN METHOD,
+        },
         'GetKeyPresses': {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
                 'method': 'POST',
@@ -659,8 +662,6 @@ class Conference(Element):
                     params['RecordFile'] = record_file
                 self.fetch_rest_xml(self.action, params, method=self.method)
 
-
-
 class Dial(Element):
     """Dial another phone number and connect it to this call
 
@@ -1056,7 +1057,6 @@ class Dial(Element):
                 else:
                     spawn_raw(outbound_socket.send_to_url, self.action, params, method=self.method)
 
-
 class GetDigits(Element):
     """Get digits from the caller's keypad
 
@@ -1224,6 +1224,39 @@ class GetDigits(Element):
         # no digits received
         outbound_socket.log.info("GetDigits, No Digits Received")
 
+class BreakOnAnsweringMachine(Element):
+    def __init__(self):
+        Element.__init__(self)
+        self.nestables = ('GetKeyPresses')
+        self.action = None
+
+    def parse_element(self, element, uri = None):
+        Element.parse_element(self, element, uri)
+        action = self.extract_attribute_value("action")
+        if action and is_valid_url(action):
+            self.action = action
+        else:
+            self.action = None
+
+    def execute(self, outbound_socket):
+        getkey = None
+        for child_instance in self.children:
+            if isinstance(child_instance, GetKeyPresses):
+                getkey = child_instance
+                break
+        if getkey is None:
+            return
+
+        try:
+            getkey.do_beep_detect = True
+            getkey.run(outbound_socket)
+        except AnsweringMachineBeep:
+            params = {
+                'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
+                'CallUUID': outbound_socket.get_channel_unique_id()
+            }
+            self.fetch_rest_xml(self.action, params)
+
 class GetKeyPresses(Element):
     """Get digits from the caller's keypad, like GetDigits, but uses
     different dialplay apps
@@ -1310,6 +1343,10 @@ class GetKeyPresses(Element):
         outbound_socket.playback(self.play_str)
         playback_ended = False
         pr = None
+        beep_detector = None
+        if self.do_beep_detect:
+            beep_detector = BeepDetector(outbound_socket, False, outbound_socket.get_channel_unique_id(), True)
+            beep_detector.start()
         while not outbound_socket.has_hangup():
             event = outbound_socket.wait_for_action()
 
@@ -1317,12 +1354,17 @@ class GetKeyPresses(Element):
                 pr = self._process_dtmf_event(outbound_socket, event)
                 if pr.valid_press:
                     break
+            elif beep_detector is not None:
+                beep_detector.run(event)
 
             # playback has ended, wait for a key press or timeout
             if event['Application'] != None and event['Application'] == 'playback':
                 playback_ended = True
-                pr = self._get_dtmf_or_timeout(outbound_socket)
+                pr = self._get_dtmf_or_timeout(outbound_socket, beep_detector)
         
+        if beep_detector is not None:
+            beep_detector.stop()
+
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
             all_pressed = self._aggregate(already_pressed, ',', self.all_keys)
@@ -1347,7 +1389,7 @@ class GetKeyPresses(Element):
                     self._kill_playback(outbound_socket)
                 self.fetch_rest_xml(self.action, params, self.method)
 
-    def _get_dtmf_or_timeout(self, outbound_socket):
+    def _get_dtmf_or_timeout(self, outbound_socket, beep_detector = None):
         with Stopwatch() as sw:
             while not outbound_socket.has_hangup() \
                 and sw.get_elapsed() < self.timeout:
@@ -1356,6 +1398,8 @@ class GetKeyPresses(Element):
                     pr = self._process_dtmf_event(outbound_socket, event)
                     if pr.valid_press:
                         break
+                elif beep_detector is not None:
+                    beep_detector.run(event)
 
     def _process_dtmf_event(self, sock, e):
         kp = e['DTMF-Digit']
@@ -1491,7 +1535,6 @@ class AnsweringMachineDetect(Element):
         self.fetch_rest_xml(self.amd_callback_url, params)
 
 class LeaveMessage(Element):
-
     def __init__(self):
         Element.__init__(self)
         self.nestables = ('Speak', 'Play', 'Hangup', 'PlayMany')
@@ -1505,30 +1548,22 @@ class LeaveMessage(Element):
         if detect_type not in ('avmd', 'spandsp'):
             raise RESTFormatException("valid 'detectType values are 'avmd' or 'spandsp'")
         self.use_avmd = detect_type == 'avmd'
-
-    def execute(self, outbound_socket):
-        play_str = ''
+        self.play_str = ''
         for child_instance in self.children:
             #outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                play_str += roll_wait_play_speak(outbound_socket.log, \
+                self.play_str += roll_wait_play_speak(outbound_socket.log, \
                     outbound_socket.save_dir, child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                play_str += roll_wait_play_speak(outbound_socket.log, \
+                self.play_str += roll_wait_play_speak(outbound_socket.log, \
                     outbound_socket.save_dir, self.children)
                 break
 
-        guid = outbound_socket.get_channel_unique_id()
-
-        #todo: remove
-        #record_file = '/tmp/' + guid + '.wav'
-        #outbound_socket.set("RECORD_STEREO=true")
-        #outbound_socket.api("uuid_record %s start %s" %  (guid, record_file))
-        #end todo
-
-        beep_detector = BeepDetector(outbound_socket, self.use_avmd, guid)
+    def execute(self, outbound_socket):
+        #self._start_debug_record(outbound_socket)
+        beep_detector = BeepDetector(outbound_socket, self.use_avmd, outbound_socket.get_channel_unique_id())
         beep_detector.start()
-        self.play_and_wait_for_beep(outbound_socket, play_str, beep_detector, guid)
+        self.play_and_wait_for_beep(outbound_socket, self.play_str, beep_detector)
         stop_state = beep_detector.stop()
 
         if stop_state.info.got_beep:
@@ -1539,13 +1574,21 @@ class LeaveMessage(Element):
         self.playback_wait(outbound_socket) 
 
         # play again! why not?
-        outbound_socket.playback(play_str)
+        outbound_socket.playback(self.play_str)
         self.playback_wait(outbound_socket)
+        #self._stop_debug_record(outbound_socket)
 
-        #todo: remove
-        #outbound_socket.api("uuid_record %s stop %s" %  (guid, record_file))
+    def _start_debug_record(self, outbound_socket):
+        guid = outbound_socket.get_channel_unique_id()
+        self.record_file = '/tmp/' + guid + '.wav'
+        outbound_socket.set("RECORD_STEREO=true")
+        outbound_socket.api("uuid_record %s start %s" %  (guid, self.record_file))
 
-    def play_and_wait_for_beep(self, outbound_socket, play_str, beep_detector, guid):
+    def _stop_debug_record(self, outbound_socket):
+        outbound_socket.api("uuid_record %s stop %s" %  (outbound_socket.get_channel_unique_id(), self.record_file))
+
+    def play_and_wait_for_beep(self, outbound_socket, play_str, beep_detector):
+        guid = outbound_socket.get_channel_unique_id()
         outbound_socket.playback(play_str, '!', guid, False)
         elapsed_time = 0.0
         while not outbound_socket.has_hangup():
@@ -1623,7 +1666,6 @@ class Hangup(Element):
             outbound_socket.hangup(reason)
         return self.reason
 
-
 class Number(Element):
     """Specify phone number in a nested Dial element.
 
@@ -1675,8 +1717,6 @@ class Number(Element):
         if gateway_retries:
             self.gateway_retries = gateway_retries.split(',')
 
-
-
 class Wait(Element):
     """Wait for some time to further process the call
 
@@ -1705,9 +1745,7 @@ class Wait(Element):
         outbound_socket.execute('playback', pause_str)
         event = outbound_socket.wait_for_action()
 
-
 class PlayMany(Element):
-
     def __init__(self):
         Element.__init__(self)
         self.nestables = ('Play', 'Speak', 'Wait')
@@ -1736,7 +1774,6 @@ class PlayMany(Element):
                             % str(res.get_response()))
         outbound_socket.log.info("Play Finished")
         return
-
 
 class Play(Element):
     """Play local audio file or at a URL
@@ -1809,7 +1846,6 @@ class Play(Element):
         else:
             outbound_socket.log.error("Invalid Sound File - Ignoring Play")
 
-
 class PreAnswer(Element):
     """Answer the call in Early Media Mode and execute nested element
     """
@@ -1833,7 +1869,6 @@ class PreAnswer(Element):
             if hasattr(child_instance, "run"):
                 child_instance.run(outbound_socket)
         outbound_socket.log.info("PreAnswer Completed")
-
 
 class Record(Element):
     """Record audio from caller
@@ -1985,7 +2020,6 @@ class Record(Element):
             else:
                 spawn_raw(outbound_socket.send_to_url, self.action, params, method=self.method)
 
-
 class SIPTransfer(Element):
     def __init__(self):
         Element.__init__(self)
@@ -2012,7 +2046,6 @@ class SIPTransfer(Element):
                 outbound_socket.redirect(self.sip_url) 
             raise RESTSIPTransferException(self.sip_url)
         raise RESTFormatException("SIPTransfer must have a sip uri")
-
 
 class Redirect(Element):
     """Redirect call flow to another Url.
@@ -2224,7 +2257,6 @@ class Speak(Element):
             outbound_socket.log.error("Speak Failed - %s" \
                             % str(res.get_response()))
             return
-
 
 class GetSpeech(Element):
     """Get speech from the caller

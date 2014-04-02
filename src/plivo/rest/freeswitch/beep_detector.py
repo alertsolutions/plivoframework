@@ -14,8 +14,9 @@ class BeepState:
             self.outbound_socket = last_state.outbound_socket
 
 class BeepDetector:
-    def __init__(self, outbound_socket, use_avmd, guid):
+    def __init__(self, outbound_socket, use_avmd, guid, exceptional = False):
         outbound_socket.filter('Event-Name DETECTED_TONE')
+        self.exceptional = exceptional
         self.log = outbound_socket.log
         self.initial = StartDetecting(None)
         self.initial.info = BeepInfo(use_avmd = use_avmd, guid = guid, got_beep = False)
@@ -29,6 +30,8 @@ class BeepDetector:
         start = self.current_state.__class__.__name__
         self.current_state = self.current_state.run(e)
         self.log.debug('beep state: %s => %s' % (start, self.current_state.__class__.__name__))
+        if isinstance(self.current_state, Stopped) and self.exceptional:
+            raise AnsweringMachineBeep
         return self.current_state
 
     def stop(self):
