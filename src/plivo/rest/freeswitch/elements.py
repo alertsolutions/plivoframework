@@ -1298,16 +1298,16 @@ class GetKeyPresses(Element):
         else:
             self.no_key = None
 
-    def execute(self, outbound_socket):
-        play_str = roll_wait_play_speak(outbound_socket.log, \
+        self.play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
 
-        outbound_socket.log.info("%s Started %s" % (self.name, play_str))
+    def execute(self, outbound_socket):
+        outbound_socket.log.info("%s Started %s" % (self.name, self.play_str))
         keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
             '' if self.finish_on_key == '' else self.finish_on_key + '?'))
         outbound_socket.log.debug('key press regex is [ %s ]' % self.keypress_regex.pattern)
-        outbound_socket.playback(play_str)
+        outbound_socket.playback(self.play_str)
         playback_ended = False
         pr = None
         while not outbound_socket.has_hangup():
@@ -1317,22 +1317,11 @@ class GetKeyPresses(Element):
                 pr = self._process_dtmf_event(outbound_socket, event)
                 if pr.valid_press:
                     break
-            elif event['Event-Name'] == 'CHANNEL_HANGUP_COMPLETE':
-                outbound_socket.log.info(self.name + ' got hangup')
-                break
 
+            # playback has ended, wait for a key press or timeout
             if event['Application'] != None and event['Application'] == 'playback':
-                # playback has ended, wait for a key press or timeout
                 playback_ended = True
-                with Stopwatch() as sw:
-                    while not outbound_socket.has_hangup() \
-                        and sw.get_elapsed() < self.timeout:
-                        event = outbound_socket.wait_for_action(self.timeout - sw.get_elapsed())
-                        if event['Event-Name'] == 'DTMF':
-                            pr = self._process_dtmf_event(outbound_socket, event)
-                            if pr.valid_press:
-                                break
-                break
+                pr = self._get_dtmf_or_timeout(outbound_socket)
         
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
@@ -1355,13 +1344,18 @@ class GetKeyPresses(Element):
                 dtmfs = self.dtmfs if not pr.was_terminated else self.dtmfs[:-1]
                 params = { 'Digits': dtmfs }
                 if not playback_ended:
-                    # if we killed playback we'll have to wait for the CHANNEL_EXECUTE_COMPLETE event
-                    outbound_socket.api('uuid_break %s all' % outbound_socket.get_channel_unique_id())
-                    playback_event = outbound_socket.wait_for_action(1)
-                    # make sure queue is empty
-                    while outbound_socket.get_action_no_wait() is not None:
-                        pass
+                    self._kill_playback(outbound_socket)
                 self.fetch_rest_xml(self.action, params, self.method)
+
+    def _get_dtmf_or_timeout(self, outbound_socket):
+        with Stopwatch() as sw:
+            while not outbound_socket.has_hangup() \
+                and sw.get_elapsed() < self.timeout:
+                event = outbound_socket.wait_for_action(self.timeout - sw.get_elapsed())
+                if event['Event-Name'] == 'DTMF':
+                    pr = self._process_dtmf_event(outbound_socket, event)
+                    if pr.valid_press:
+                        break
 
     def _process_dtmf_event(self, sock, e):
         kp = e['DTMF-Digit']
@@ -1381,6 +1375,13 @@ class GetKeyPresses(Element):
         else:
             return GetKeyPresses.PressResult(valid_press = False, was_terminated = was_terminated)
 
+    def _kill_playback(self, outbound_socket):
+        # if we killed playback we'll have to wait for the CHANNEL_EXECUTE_COMPLETE event
+        outbound_socket.api('uuid_break %s all' % outbound_socket.get_channel_unique_id())
+        playback_event = outbound_socket.wait_for_action(1)
+        # make sure queue is empty
+        while outbound_socket.get_action_no_wait() is not None:
+            pass
 
     def _aggregate(self, start, char, append_me):
         return '%s%s' % ('' if not start else start + char, append_me)
@@ -1416,7 +1417,6 @@ class AnsweringMachineDetect(Element):
 
     def execute(self, outbound_socket):
         outbound_socket.filter('Event-Name DETECTED_SPEECH')
-        outbound_socket.filter('Event-Name DETECTED_TONE')
         outbound_socket.log.info('amd callback: %s' % self.amd_callback_url)
         outbound_socket.playback('silence_stream://%s' % self.pre_detect_pause)
         outbound_socket.wait_for_action()
