@@ -15,9 +15,7 @@ from plivo.core.freeswitch.eventsocket import EventSocket
 from plivo.core.freeswitch.transport import OutboundTransport
 from plivo.core.errors import ConnectError
 
-
 BACKLOG = 2048
-
 
 class OutboundEventSocket(EventSocket):
     '''
@@ -91,7 +89,6 @@ class OutboundEventSocket(EventSocket):
         '''
         pass
 
-
 class OutboundServer(StreamServer):
     '''
     FreeSWITCH Outbound Event Server
@@ -133,13 +130,6 @@ class OutboundServer(StreamServer):
     def handle_request(self, socket, address):
         self._requestClass(socket, address, self._filter)
         
-
-
-
-
-
-
-
 if __name__ == '__main__':
     outboundserver = OutboundServer(('127.0.0.1', 8084), OutboundEventSocket)
     outboundserver.serve_forever()

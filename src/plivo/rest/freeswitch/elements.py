@@ -22,7 +22,6 @@ from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         HTTPRequest, Stopwatch
 
 from plivo.rest.freeswitch.beep_detector import *
-
 from plivo.rest.freeswitch.exceptions import RESTFormatException, \
                                             RESTAttributeException, \
                                             RESTRedirectException, \
@@ -71,6 +70,7 @@ ELEMENTS_DEFAULT_PARAMS = {
         },
         'BreakOnAnsweringMachine' : {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
+                'method': 'POST'
         },
         'GetKeyPresses': {
                 #action: DYNAMIC! MUST BE SET IN METHOD,
@@ -290,7 +290,6 @@ class Element(object):
 
     def fetch_rest_xml(self, url, params={}, method='POST'):
         raise RESTRedirectException(url, params, method)
-
 
 class Conference(Element):
     """Go to a Conference Room
@@ -1225,6 +1224,7 @@ class GetDigits(Element):
         outbound_socket.log.info("GetDigits, No Digits Received")
 
 class BreakOnAnsweringMachine(Element):
+
     def __init__(self):
         Element.__init__(self)
         self.nestables = ('GetKeyPresses')
@@ -1246,16 +1246,17 @@ class BreakOnAnsweringMachine(Element):
                 break
         if getkey is None:
             return
+        outbound_socket.beep_detector = BeepDetector(outbound_socket, False, outbound_socket.get_channel_unique_id())
+        outbound_socket.beep_detector.beep_event.append(self._beep_handler)
+        getkey.run(outbound_socket)
 
-        try:
-            getkey.do_beep_detect = True
-            getkey.run(outbound_socket)
-        except AnsweringMachineBeep:
-            params = {
-                'RequestUUID': outbound_socket.get_var('plivo_request_uuid'),
-                'CallUUID': outbound_socket.get_channel_unique_id()
-            }
-            self.fetch_rest_xml(self.action, params)
+    def _beep_handler(self, beep_state):
+        beep_state.outbound_socket.log.debug("in beep handler")
+        params = {
+            'RequestUUID': beep_state.outbound_socket.get_var('plivo_request_uuid'),
+            'CallUUID': beep_state.outbound_socket.get_channel_unique_id()
+        }
+        self.fetch_rest_xml(self.action, params)
 
 class GetKeyPresses(Element):
     """Get digits from the caller's keypad, like GetDigits, but uses
@@ -1331,10 +1332,9 @@ class GetKeyPresses(Element):
         else:
             self.no_key = None
 
+    def execute(self, outbound_socket):
         self.play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
-
-    def execute(self, outbound_socket):
         outbound_socket.log.info("%s Started %s" % (self.name, self.play_str))
         keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
@@ -1343,12 +1343,11 @@ class GetKeyPresses(Element):
         outbound_socket.playback(self.play_str)
         playback_ended = False
         pr = None
-        beep_detector = None
-        if self.do_beep_detect:
-            beep_detector = BeepDetector(outbound_socket, False, outbound_socket.get_channel_unique_id(), True)
+        if outbound_socket.beep_detector is not None:
+            beep_detector = outbound_socket.beep_detector
             beep_detector.start()
         while not outbound_socket.has_hangup():
-            event = outbound_socket.wait_for_action()
+            event = outbound_socket.wait_for_action(0.5)
 
             if event['Event-Name'] == 'DTMF':
                 pr = self._process_dtmf_event(outbound_socket, event)
@@ -1360,7 +1359,7 @@ class GetKeyPresses(Element):
             # playback has ended, wait for a key press or timeout
             if event['Application'] != None and event['Application'] == 'playback':
                 playback_ended = True
-                pr = self._get_dtmf_or_timeout(outbound_socket, beep_detector)
+                pr = self._get_dtmf_or_timeout(outbound_socket)
         
         if beep_detector is not None:
             beep_detector.stop()
@@ -1389,17 +1388,17 @@ class GetKeyPresses(Element):
                     self._kill_playback(outbound_socket)
                 self.fetch_rest_xml(self.action, params, self.method)
 
-    def _get_dtmf_or_timeout(self, outbound_socket, beep_detector = None):
+    def _get_dtmf_or_timeout(self, outbound_socket):
         with Stopwatch() as sw:
             while not outbound_socket.has_hangup() \
                 and sw.get_elapsed() < self.timeout:
-                event = outbound_socket.wait_for_action(self.timeout - sw.get_elapsed())
+                event = outbound_socket.wait_for_action(0.5)
                 if event['Event-Name'] == 'DTMF':
                     pr = self._process_dtmf_event(outbound_socket, event)
                     if pr.valid_press:
                         break
-                elif beep_detector is not None:
-                    beep_detector.run(event)
+                elif outbound_socket.beep_detector is not None:
+                    outbound_socket.beep_detector.run(event)
 
     def _process_dtmf_event(self, sock, e):
         kp = e['DTMF-Digit']
@@ -1540,6 +1539,7 @@ class LeaveMessage(Element):
         self.nestables = ('Speak', 'Play', 'Hangup', 'PlayMany')
         self.wait_for_beep = 3
         self.use_avmd = True
+        self.play_str = ''
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
@@ -1548,27 +1548,29 @@ class LeaveMessage(Element):
         if detect_type not in ('avmd', 'spandsp'):
             raise RESTFormatException("valid 'detectType values are 'avmd' or 'spandsp'")
         self.use_avmd = detect_type == 'avmd'
-        self.play_str = ''
+
+    def _build_play_from_children(self, outbound_socket):
+        log = outbound_socket.log
+        save_dir = outbound_socket.save_dir
+        play_str = ''
         for child_instance in self.children:
-            #outbound_socket.log.debug(str(child_instance))
+            outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                self.play_str += roll_wait_play_speak(outbound_socket.log, \
-                    outbound_socket.save_dir, child_instance.children)
+                play_str += roll_wait_play_speak(log, save_dir, child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                self.play_str += roll_wait_play_speak(outbound_socket.log, \
-                    outbound_socket.save_dir, self.children)
+                play_str += roll_wait_play_speak(log, save_dir, self.children)
                 break
+        return play_str
 
     def execute(self, outbound_socket):
+        self.play_str = self._build_play_from_children(outbound_socket)
         #self._start_debug_record(outbound_socket)
         beep_detector = BeepDetector(outbound_socket, self.use_avmd, outbound_socket.get_channel_unique_id())
+        beep_detector.beep_event.append(self._beep_handler)
         beep_detector.start()
-        self.play_and_wait_for_beep(outbound_socket, self.play_str, beep_detector)
+        outbound_socket.beep_detector = beep_detector
+        self._play_and_wait_for_beep(outbound_socket, self.play_str)
         stop_state = beep_detector.stop()
-
-        if stop_state.info.got_beep:
-            outbound_socket.log.info('detected VM tone: ' + stop_state.info.beep_tone_name)
-            outbound_socket.execute('break', 'all')
 
         # wait for most recent playback, which either just "broke" or is still playing
         self.playback_wait(outbound_socket) 
@@ -1577,6 +1579,10 @@ class LeaveMessage(Element):
         outbound_socket.playback(self.play_str)
         self.playback_wait(outbound_socket)
         #self._stop_debug_record(outbound_socket)
+
+    def _beep_handler(self, state):
+        state.outbound_socket.log.info('detected VM tone: ' + state.info.beep_tone_name)
+        state.outbound_socket.execute('break', 'all')
 
     def _start_debug_record(self, outbound_socket):
         guid = outbound_socket.get_channel_unique_id()
@@ -1587,7 +1593,7 @@ class LeaveMessage(Element):
     def _stop_debug_record(self, outbound_socket):
         outbound_socket.api("uuid_record %s stop %s" %  (outbound_socket.get_channel_unique_id(), self.record_file))
 
-    def play_and_wait_for_beep(self, outbound_socket, play_str, beep_detector):
+    def _play_and_wait_for_beep(self, outbound_socket, play_str):
         guid = outbound_socket.get_channel_unique_id()
         outbound_socket.playback(play_str, '!', guid, False)
         elapsed_time = 0.0
@@ -1600,7 +1606,7 @@ class LeaveMessage(Element):
                 and e['Application'] == 'playback':
                 outbound_socket.playback(play_str, '!', guid, False)
             else:
-                if isinstance(beep_detector.run(e), Stopped):
+                if isinstance(outbound_socket.beep_detector.run(e), Stopped):
                     break
 
             if elapsed_time > self.wait_for_beep:

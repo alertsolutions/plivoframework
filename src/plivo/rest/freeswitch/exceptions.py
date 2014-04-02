@@ -46,6 +46,3 @@ class UnrecognizedElementException(Exception):
 
 class UnsupportedResourceFormat(Exception):
     pass
-
-class AnseringMachineBeep(Exception):
-    pass
