@@ -1246,9 +1246,14 @@ class BreakOnAnsweringMachine(Element):
                 break
         if getkey is None:
             return
-        outbound_socket.beep_detector = BeepDetector(outbound_socket, False, outbound_socket.get_channel_unique_id())
-        outbound_socket.beep_detector.beep_event.append(self._beep_handler)
-        getkey.run(outbound_socket)
+
+        try:
+            outbound_socket.beep_detector = BeepDetector(outbound_socket, False, outbound_socket.get_channel_unique_id())
+            outbound_socket.beep_detector.beep_event.append(self._beep_handler)
+            outbound_socket.beep_detector.start()
+            getkey.run(outbound_socket)
+        finally:
+            outbound_socket.beep_detector.stop()
 
     def _beep_handler(self, beep_state):
         beep_state.outbound_socket.log.debug("in beep handler")
@@ -1343,26 +1348,21 @@ class GetKeyPresses(Element):
         outbound_socket.playback(self.play_str)
         playback_ended = False
         pr = None
-        if outbound_socket.beep_detector is not None:
-            beep_detector = outbound_socket.beep_detector
-            beep_detector.start()
         while not outbound_socket.has_hangup():
             event = outbound_socket.wait_for_action(0.5)
 
-            if event['Event-Name'] == 'DTMF':
-                pr = self._process_dtmf_event(outbound_socket, event)
-                if pr.valid_press:
-                    break
-            elif beep_detector is not None:
-                beep_detector.run(event)
-
-            # playback has ended, wait for a key press or timeout
             if event['Application'] != None and event['Application'] == 'playback':
+                # playback has ended, wait for a key press or timeout
                 playback_ended = True
                 pr = self._get_dtmf_or_timeout(outbound_socket)
-        
-        if beep_detector is not None:
-            beep_detector.stop()
+            elif event['Event-Name'] == 'DTMF':
+                pr = self._process_dtmf_event(outbound_socket, event)
+            elif outbound_socket.beep_detector is not None:
+                outbound_socket.beep_detector.run(event)
+
+            if playback_ended \
+                or (pr is not None and pr.valid_press):
+                break
 
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
@@ -1392,6 +1392,8 @@ class GetKeyPresses(Element):
         with Stopwatch() as sw:
             while not outbound_socket.has_hangup() \
                 and sw.get_elapsed() < self.timeout:
+                countdown = self.timeout - sw.get_elapsed()
+                outbound_socket.log.debug("will wait %f more seconds for key press" % countdown)
                 event = outbound_socket.wait_for_action(0.5)
                 if event['Event-Name'] == 'DTMF':
                     pr = self._process_dtmf_event(outbound_socket, event)
