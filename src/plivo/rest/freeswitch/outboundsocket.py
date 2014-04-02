@@ -59,8 +59,6 @@ class RequestLogger(object):
         """Log debug level"""
         self.logger.debug('(%s) %s' % (self.request_id, safe_str(msg)))
 
-
-
 class PlivoOutboundEventSocket(OutboundEventSocket):
     """Class PlivoOutboundEventSocket
 
@@ -131,6 +129,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         self.answered = False
         self.cache = cache
         self.save_dir = save_dir
+        self.beep_detector = None
         # inherits from outboundsocket
         OutboundEventSocket.__init__(self, socket, address, filter=None,
                                      eventjson=True, pool_size=200, trace=trace)
@@ -228,7 +227,7 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             self._action_queue.put(event)
 
     def on_detected_tone(self, event):
-        if self.current_element == 'LeaveMessage':
+        if self.beep_detector is not None:
             self._action_queue.put(event)
 
     def on_dtmf(self, event):
@@ -708,4 +707,3 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
                 self.hangup()
             else:
                 self.log.info('Transfer In Progress !')
-
