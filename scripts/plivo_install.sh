@@ -5,8 +5,8 @@
 # Copyright (c) 2011 Plivo Team. See LICENSE for details.
 
 
-PLIVO_GIT_REPO=git://github.com/asajohnston/plivoframework.git
-PLIVO_SETUP_SCRIPT=https://raw.github.com/asajohnston/plivoframework/master/scripts/ez_setup.py
+PLIVO_GIT_REPO=git://github.com/alertsolutions/plivoframework.git
+PLIVO_SETUP_SCRIPT=https://raw.github.com/alertsolutions/plivoframework/master/scripts/ez_setup.py
 
 # TODO: need better argument handling
 NOT_INTERACTIVE=$2
