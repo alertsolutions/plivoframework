@@ -1364,6 +1364,10 @@ class GetKeyPresses(Element):
                 or (pr is not None and pr.valid_press):
                 break
 
+        if outbound_socket.has_hangup():
+            outbound_socket.log.info("hangup waiting for key press")
+            return
+
         already_pressed = outbound_socket.get_var('plivo_keys_pressed')
         if len(self.all_keys) > 0: 
             all_pressed = self._aggregate(already_pressed, ',', self.all_keys)
@@ -1375,13 +1379,14 @@ class GetKeyPresses(Element):
         # got a valid dtmf
         if pr is not None and pr.valid_press:
             outbound_socket.log.info("%s, Digits '%s' Received" % (self.name, self.dtmfs))
-            if self.action:
-                # Redirect
-                dtmfs = self.dtmfs if not pr.was_terminated else self.dtmfs[:-1]
-                params = { 'Digits': dtmfs }
-                if not playback_ended:
-                    self._kill_playback(outbound_socket)
-                self.fetch_rest_xml(self.action, params, self.method)
+            if self.action is None:
+                return
+            # Redirect
+            dtmfs = self.dtmfs if not pr.was_terminated else self.dtmfs[:-1]
+            params = { 'Digits': dtmfs }
+            if not playback_ended:
+                self._kill_playback(outbound_socket)
+            self.fetch_rest_xml(self.action, params, self.method)
 
         # no digits received
         outbound_socket.log.info(self.name + ", No Digits Received")
