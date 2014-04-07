@@ -1254,6 +1254,7 @@ class BreakOnAnsweringMachine(Element):
             getkey.run(outbound_socket)
         finally:
             outbound_socket.beep_detector.stop()
+            outbound_socket.beep_detector = None
 
     def _beep_handler(self, beep_state):
         beep_state.outbound_socket.log.debug("in beep handler")
@@ -1340,6 +1341,7 @@ class GetKeyPresses(Element):
     def execute(self, outbound_socket):
         self.play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
+        outbound_socket.filter('Event-Name DTMF')
         outbound_socket.log.info("%s Started %s" % (self.name, self.play_str))
         keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
@@ -1586,12 +1588,13 @@ class LeaveMessage(Element):
         beep_detector.start()
         outbound_socket.beep_detector = beep_detector
         self._play_and_wait_for_beep(outbound_socket, self.play_str)
-        stop_state = beep_detector.stop()
+        beep_detector.stop()
 
         # wait for most recent playback, which either just "broke" or is still playing
         self.playback_wait(outbound_socket) 
 
-        # play again! why not?
+        # if we detected a beep, this is where we leave the message
+        # otherwise: play again! why not?
         outbound_socket.playback(self.play_str)
         self.playback_wait(outbound_socket)
         #self._stop_debug_record(outbound_socket)
