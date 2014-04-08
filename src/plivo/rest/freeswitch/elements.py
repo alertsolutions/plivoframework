@@ -1342,6 +1342,7 @@ class GetKeyPresses(Element):
         self.play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
         outbound_socket.filter('Event-Name DTMF')
+        outbound_socket.execute('start_dtmf')
         outbound_socket.log.info("%s Started %s" % (self.name, self.play_str))
         keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
@@ -1366,6 +1367,7 @@ class GetKeyPresses(Element):
                 or (pr is not None and pr.valid_press):
                 break
 
+        outbound_socket.execute('stop_dtmf')
         if outbound_socket.has_hangup():
             outbound_socket.log.info("hangup waiting for key press")
             return
