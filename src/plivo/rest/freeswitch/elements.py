@@ -221,6 +221,17 @@ def roll_wait_play_speak(log, save_dir, children):
 
     return play_str
 
+def playback_wait(outbound_socket, timeout=300):
+    with Stopwatch() as sw:
+        f = outbound_socket.wait_for_action(5)
+        while (f['Application'] is None or f['Application'] != 'playback') \
+            and (not outbound_socket.has_hangup() and sw.get_elapsed() < timeout):
+            f = outbound_socket.wait_for_action(5)
+        if sw.get_elapsed() >= timeout:
+            outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
+            return None
+    return f
+
 class Element(object):
     """Abstract Element Class to be inherited by all other elements"""
 
@@ -1593,12 +1604,12 @@ class LeaveMessage(Element):
         beep_detector.stop()
 
         # wait for most recent playback, which either just "broke" or is still playing
-        self.playback_wait(outbound_socket) 
+        playback_wait(outbound_socket) 
 
         # if we detected a beep, this is where we leave the message
         # otherwise: play again! why not?
         outbound_socket.playback(self.play_str)
-        self.playback_wait(outbound_socket)
+        playback_wait(outbound_socket)
         #self._stop_debug_record(outbound_socket)
 
     def _beep_handler(self, state):
@@ -1633,17 +1644,6 @@ class LeaveMessage(Element):
             if elapsed_time > self.wait_for_beep:
                 outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, elapsed_time))
                 break
-
-    def playback_wait(self, outbound_socket, timeout=300):
-        with Stopwatch() as sw:
-            f = outbound_socket.wait_for_action(5)
-            while (f['Application'] is None or f['Application'] != 'playback') \
-                and (not outbound_socket.has_hangup() and sw.get_elapsed() < timeout):
-                f = outbound_socket.wait_for_action(5)
-            if sw.get_elapsed() >= timeout:
-                outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
-                return False
-        return True
 
 class Hangup(Element):
     """Hangup the call
@@ -1790,14 +1790,8 @@ class PlayMany(Element):
         outbound_socket.log.debug("Playing %s" % play_str)
         res = outbound_socket.playback(play_str)
         if res.is_success():
-            while not outbound_socket.has_hangup():
-                event = outbound_socket.wait_for_action()
-                # hack to deal with mod_amd's voice_stop() bug
-                if event['Event-Name'] == 'DETECTED_SPEECH':
-                    continue
-                else:
-                    break
-            if event.is_empty():
+            event = playback_wait(outbound_socket)
+            if event is None:
                 outbound_socket.log.warn("Play Break (empty event)")
                 return
             outbound_socket.log.debug("Play done (%s)" \
@@ -1865,8 +1859,8 @@ class Play(Element):
             outbound_socket.log.debug("Playing %d times" % self.loop_times)
             res = outbound_socket.playback(play_str)
             if res.is_success():
-                event = outbound_socket.wait_for_action()
-                if event.is_empty():
+                event = playback_wait(outbound_socket)
+                if event is None:
                     outbound_socket.log.warn("Play Break (empty event)")
                     return
                 outbound_socket.log.debug("Play done (%s)" \
