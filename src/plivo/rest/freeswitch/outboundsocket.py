@@ -235,6 +235,11 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
             or self.current_element == 'GetDigits':
             self._action_queue.put(event)
 
+    def on_playback_stop(self, event):
+        if self.current_element == 'GetKeyPresses' \
+            or self.beep_detector is not None:
+            self._action_queue.put(event)
+
     def on_custom(self, event):
         if self.current_element == 'LeaveMessage':
             if event['Event-Subclass'] == 'avmd::beep' \

@@ -171,18 +171,17 @@ ELEMENTS_DEFAULT_PARAMS = {
         }
     }
 
-
 MAX_LOOPS = 10000
 
 def roll_wait_play_speak(log, save_dir, children):
-    play_str = 'file_string://'
+    play_str = []
     first = True
     for child_instance in children:
         log.debug('rolling %s ' % child_instance.name)
         if first:
-            play_str += 'silence_stream://1!'
+            play_str.append('silence_stream://1')
         if isinstance(child_instance, Wait):
-            play_str += 'silence_stream://%d!' % (child_instance.length * 1000)
+            play_str.append('silence_stream://%d' % (child_instance.length * 1000))
         if isinstance(child_instance, Play):
             sound_file = child_instance.sound_file_path
             if sound_file:
@@ -192,7 +191,7 @@ def roll_wait_play_speak(log, save_dir, children):
                     loop = MAX_LOOPS  # Add a high number to Play infinitely
                 # Play the file loop number of times
                 for x in range(loop):
-                    play_str += sound_file + '!'
+                    play_str.append(sound_file)
         elif isinstance(child_instance, Speak):
             text = child_instance.text
             # escape simple quote
@@ -213,11 +212,9 @@ def roll_wait_play_speak(log, save_dir, children):
             if not say_str:
                 continue
             for x in range(loop):
-                play_str += sound_file + '!'
+                play_str.append(sound_file)
         first = False
         #log.debug('play_str: %s' % play_str)
-    if play_str.endswith('!'):
-        return play_str[:-1]
 
     return play_str
 
@@ -231,6 +228,15 @@ def playback_wait(outbound_socket, timeout=300):
             outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
             return None
     return f
+
+def start_debug_record(outbound_socket):
+    guid = outbound_socket.get_channel_unique_id()
+    outbound_socket.record_file = '/tmp/' + guid + '.wav'
+    outbound_socket.set("RECORD_STEREO=true")
+    outbound_socket.api("uuid_record %s start %s" %  (guid, outbound_socket.record_file))
+
+def stop_debug_record(outbound_socket):
+    outbound_socket.api("uuid_record %s stop %s" %  (outbound_socket.get_channel_unique_id(), outbound_socket.record_file))
 
 class Element(object):
     """Abstract Element Class to be inherited by all other elements"""
@@ -1350,35 +1356,51 @@ class GetKeyPresses(Element):
             self.no_key = None
 
     def execute(self, outbound_socket):
+        #start_debug_record(outbound_socket)
         self.play_str = roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children)
         outbound_socket.filter('Event-Name DTMF')
+        outbound_socket.filter('Event-Name PLAYBACK_STOP')
         outbound_socket.execute('start_dtmf')
         outbound_socket.log.info("%s Started %s" % (self.name, self.play_str))
         keys_pattern = self.valid_digits.replace(',', '|').replace('*', '\*')
         self.keypress_regex = re.compile('^(?:%s)%s$' % (keys_pattern, \
             '' if self.finish_on_key == '' else self.finish_on_key + '?'))
         outbound_socket.log.debug('key press regex is [ %s ]' % self.keypress_regex.pattern)
-        outbound_socket.playback(self.play_str)
+        outbound_socket.playback(self.play_str.pop(0))
         playback_ended = False
         pr = None
-        while not outbound_socket.has_hangup():
-            event = outbound_socket.wait_for_action(0.5)
+        try:
+            while not outbound_socket.has_hangup():
+                event = outbound_socket.wait_for_action(0.5)
 
-            if event['Application'] != None and event['Application'] == 'playback':
-                # playback has ended, wait for a key press or timeout
-                playback_ended = True
-                pr = self._get_dtmf_or_timeout(outbound_socket)
-            elif event['Event-Name'] == 'DTMF':
-                pr = self._process_dtmf_event(outbound_socket, event)
-            elif outbound_socket.beep_detector is not None:
-                outbound_socket.beep_detector.run(event)
+                if event['Event-Name'] == 'PLAYBACK_STOP':
+                    # playback has ended, wait for a key press or timeout
+                    if outbound_socket.beep_detector is not None:
+                        outbound_socket.log.debug(outbound_socket.beep_detector.current_state.__class__.__name__)
+                    if outbound_socket.beep_detector is not None \
+                        and isinstance(outbound_socket.beep_detector.current_state, \
+                        DetectingSilence):
+                        outbound_socket.beep_detector.run(event)
+                    elif len(self.play_str) > 0:
+                        outbound_socket.playback(self.play_str.pop(0))
+                    else:
+                        playback_ended = True
+                        outbound_socket.filter_delete('Event-Name PLAYBACK_STOP')
+                        pr = self._get_dtmf_or_timeout(outbound_socket)
+                elif event['Event-Name'] == 'DTMF':
+                    outbound_socket.log.debug('got a DTMF keypress')
+                    pr = self._process_dtmf_event(outbound_socket, event)
+                elif outbound_socket.beep_detector is not None:
+                    outbound_socket.beep_detector.run(event)
 
-            if playback_ended \
-                or (pr is not None and pr.valid_press):
-                break
+                if playback_ended \
+                    or (pr is not None and pr.valid_press):
+                    break
+        finally:
+            outbound_socket.execute('stop_dtmf')
+            #stop_debug_record(outbound_socket)
 
-        outbound_socket.execute('stop_dtmf')
         if outbound_socket.has_hangup():
             outbound_socket.log.info("hangup waiting for key press")
             return
@@ -1569,7 +1591,7 @@ class LeaveMessage(Element):
         self.nestables = ('Speak', 'Play', 'Hangup', 'PlayMany')
         self.wait_for_beep = 30
         self.use_avmd = True
-        self.play_str = ''
+        self.play_str = []
 
     def parse_element(self, element, uri=None):
         Element.parse_element(self, element, uri)
@@ -1583,60 +1605,58 @@ class LeaveMessage(Element):
     def _build_play_from_children(self, outbound_socket):
         log = outbound_socket.log
         save_dir = outbound_socket.save_dir
-        play_str = ''
+        play_str = []
         for child_instance in self.children:
             outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                play_str += roll_wait_play_speak(log, save_dir, child_instance.children)
+                play_str = play_str + roll_wait_play_speak(log, save_dir, child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                play_str += roll_wait_play_speak(log, save_dir, self.children)
+                play_str = play_str + roll_wait_play_speak(log, save_dir, self.children)
                 break
         return play_str
 
     def execute(self, outbound_socket):
         self.play_str = self._build_play_from_children(outbound_socket)
-        #self._start_debug_record(outbound_socket)
+        #start_debug_record(outbound_socket)
         beep_detector = BeepDetector(outbound_socket, self.use_avmd, outbound_socket.get_channel_unique_id())
         beep_detector.beep_event.append(self._beep_handler)
         beep_detector.start()
         outbound_socket.beep_detector = beep_detector
-        self._play_and_wait_for_beep(outbound_socket, self.play_str)
+        self._play_and_wait_for_beep(outbound_socket, list(self.play_str))
         beep_detector.stop()
 
         # wait for most recent playback, which either just "broke" or is still playing
-        playback_wait(outbound_socket) 
+        # likely don't need this anymore, since we break instead of pausing in the beep detector
+        #playback_wait(outbound_socket)
 
         # if we detected a beep, this is where we leave the message
         # otherwise: play again! why not?
-        outbound_socket.playback(self.play_str)
+        outbound_socket.playback("file_string://" +'!'.join(self.play_str))
         playback_wait(outbound_socket)
-        #self._stop_debug_record(outbound_socket)
+        #stop_debug_record(outbound_socket)
 
     def _beep_handler(self, state):
         state.outbound_socket.log.info('detected VM tone: ' + state.info.beep_tone_name)
-        state.outbound_socket.execute('break', 'all')
+        # likely don't need this anymore, since we break instead of pausing in the beep detector
+        #state.outbound_socket.execute('break', 'all')
 
-    def _start_debug_record(self, outbound_socket):
+    def _play_and_wait_for_beep(self, outbound_socket, playlist):
+        outbound_socket.filter('Event-Name PLAYBACK_STOP')
         guid = outbound_socket.get_channel_unique_id()
-        self.record_file = '/tmp/' + guid + '.wav'
-        outbound_socket.set("RECORD_STEREO=true")
-        outbound_socket.api("uuid_record %s start %s" %  (guid, self.record_file))
-
-    def _stop_debug_record(self, outbound_socket):
-        outbound_socket.api("uuid_record %s stop %s" %  (outbound_socket.get_channel_unique_id(), self.record_file))
-
-    def _play_and_wait_for_beep(self, outbound_socket, play_str):
-        guid = outbound_socket.get_channel_unique_id()
-        outbound_socket.playback(play_str, '!', guid, False)
+        outbound_socket.playback(playlist.pop(0), '!', guid, False)
         elapsed_time = 0.0
         while not outbound_socket.has_hangup():
             with Stopwatch() as sw:
                 e = outbound_socket.wait_for_action(0.5)
                 elapsed_time += sw.get_elapsed()
 
-            if e['Event-Name'] == 'CHANNEL_EXECUTE_COMPLETE' \
-                and e['Application'] == 'playback':
-                outbound_socket.playback(play_str, '!', guid, False)
+            if e['Event-Name'] == 'PLAYBACK_STOP':
+                if isinstance(outbound_socket.beep_detector.current_state, DetectingSilence):
+                    outbound_socket.beep_detector.run(e)
+                else:
+                    if len(playlist) == 0:
+                        playlist = list(self.play_str)
+                    outbound_socket.playback(playlist.pop(0), '!', guid, False)
             else:
                 if isinstance(outbound_socket.beep_detector.run(e), Stopped):
                     break
@@ -1644,6 +1664,8 @@ class LeaveMessage(Element):
             if elapsed_time > self.wait_for_beep:
                 outbound_socket.log.info('%s reached %s sec. timeout waiting for beep' % (guid, elapsed_time))
                 break
+
+        outbound_socket.filter_delete('Event-Name PLAYBACK_STOP')
 
 class Hangup(Element):
     """Hangup the call
@@ -1784,8 +1806,8 @@ class PlayMany(Element):
         self.nestables = ('Play', 'Speak', 'Wait')
 
     def execute(self, outbound_socket):
-        play_str = roll_wait_play_speak(outbound_socket.log, \
-            outbound_socket.save_dir, self.children)
+        play_str = '!'.join(roll_wait_play_speak(outbound_socket.log, \
+            outbound_socket.save_dir, self.children))
         outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
         outbound_socket.log.debug("Playing %s" % play_str)
         res = outbound_socket.playback(play_str)
