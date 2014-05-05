@@ -1376,7 +1376,7 @@ class GetKeyPresses(Element):
 
                 if event['Event-Name'] == 'PLAYBACK_STOP':
                     # playback has ended, wait for a key press or timeout
-                    if outbound_socket.beep_detector is not None:
+                    if outbound_socket.beep_detector is not None
                         and isinstance(outbound_socket.beep_detector.current_state, \
                         DetectingSilence):
                         outbound_socket.beep_detector.run(event)
