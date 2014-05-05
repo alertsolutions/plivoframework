@@ -1377,8 +1377,6 @@ class GetKeyPresses(Element):
                 if event['Event-Name'] == 'PLAYBACK_STOP':
                     # playback has ended, wait for a key press or timeout
                     if outbound_socket.beep_detector is not None:
-                        outbound_socket.log.debug(outbound_socket.beep_detector.current_state.__class__.__name__)
-                    if outbound_socket.beep_detector is not None \
                         and isinstance(outbound_socket.beep_detector.current_state, \
                         DetectingSilence):
                         outbound_socket.beep_detector.run(event)
@@ -1806,7 +1804,8 @@ class PlayMany(Element):
         self.nestables = ('Play', 'Speak', 'Wait')
 
     def execute(self, outbound_socket):
-        play_str = '!'.join(roll_wait_play_speak(outbound_socket.log, \
+        play_str = 'file_string://' + '!'.join( \
+            roll_wait_play_speak(outbound_socket.log, \
             outbound_socket.save_dir, self.children))
         outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
         outbound_socket.log.debug("Playing %s" % play_str)

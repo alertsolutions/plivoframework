@@ -88,12 +88,11 @@ class DetectingSilence(BeepState):
         BeepState.__init__(self, last_state)
 
     def run(self, e):
-        #self.outbound_socket.log.info('detecting silence ' + e['Event-Name'])
         if e['Event-Name'] == 'PLAYBACK_STOP':
-            self.outbound_socket.log.info('ha HA! fortune cookie!')
             self.info.restart_name = e['Playback-File-Path']
             self.info.restart_sample = e['variable_playback_samples']
-            self.outbound_socket.log.info(self.info.restart_name + ' ' + self.info.restart_sample)
+            self.outbound_socket.log.info('restart' + self.info.restart_name \
+                + ' at ' + self.info.restart_sample)
 
         tone_name = e['Detected-Tone']
         if tone_name is not None and tone_name == 'SILENCE':
@@ -103,8 +102,6 @@ class DetectingSilence(BeepState):
 
         since_beep = time.time() - self.info.beep_time
         if since_beep >= 1.0:
-            #self.outbound_socket.log.info('unpause %s after %s' % (self.info.guid, since_beep))
-            #self.outbound_socket.api('uuid_fileman %s pause' % self.info.guid)
             self.outbound_socket.playback('%s@@%s' % (self.info.restart_name, self.info.restart_sample))
             self.info.restart_name = ''
             self.info.restart_sample = ''
