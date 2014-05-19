@@ -237,6 +237,8 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
 
     def on_playback_stop(self, event):
         if self.current_element == 'GetKeyPresses' \
+            or self.current_element == 'Play' \
+            or self.current_element == 'PlayMany' \
             or self.beep_detector is not None:
             self._action_queue.put(event)
 

@@ -22,13 +22,13 @@ from plivo.rest.freeswitch.helpers import is_valid_url, is_sip_url, \
                                         HTTPRequest, Stopwatch
 
 from plivo.rest.freeswitch.beep_detector import *
+from plivo.rest.freeswitch.playback_tool import PlaybackTool
 from plivo.rest.freeswitch.exceptions import RESTFormatException, \
                                             RESTAttributeException, \
                                             RESTRedirectException, \
                                             RESTSIPTransferException, \
                                             RESTNoExecuteException, \
                                             RESTHangup
-
 
 ELEMENTS_DEFAULT_PARAMS = {
         'Conference': {
@@ -172,71 +172,6 @@ ELEMENTS_DEFAULT_PARAMS = {
     }
 
 MAX_LOOPS = 10000
-
-def roll_wait_play_speak(log, save_dir, children):
-    play_str = []
-    first = True
-    for child_instance in children:
-        log.debug('rolling %s ' % child_instance.name)
-        if first:
-            play_str.append('silence_stream://1')
-        if isinstance(child_instance, Wait):
-            play_str.append('silence_stream://%d' % (child_instance.length * 1000))
-        if isinstance(child_instance, Play):
-            sound_file = child_instance.sound_file_path
-            if sound_file:
-                sound_file = re_root(sound_file, save_dir)
-                loop = child_instance.loop_times
-                if loop == 0:
-                    loop = MAX_LOOPS  # Add a high number to Play infinitely
-                # Play the file loop number of times
-                for x in range(loop):
-                    play_str.append(sound_file)
-        elif isinstance(child_instance, Speak):
-            text = child_instance.text
-            # escape simple quote
-            text = text.replace("'", "\\'")
-            loop = child_instance.loop_times
-            child_type = child_instance.item_type
-            method = child_instance.method
-            say_str = ''
-            if child_type and method:
-                language = child_instance.language
-                say_args = "%s.wav %s %s %s '%s'" \
-                                % (language, language, child_type, method, text)
-                say_str = "${say_string %s}" % say_args
-            else:
-                engine = child_instance.engine
-                voice = child_instance.voice
-                say_str = "say:%s:%s:'%s'" % (engine, voice, text)
-            if not say_str:
-                continue
-            for x in range(loop):
-                play_str.append(sound_file)
-        first = False
-        #log.debug('play_str: %s' % play_str)
-
-    return play_str
-
-def playback_wait(outbound_socket, timeout=300):
-    with Stopwatch() as sw:
-        f = outbound_socket.wait_for_action(5)
-        while (f['Application'] is None or f['Application'] != 'playback') \
-            and (not outbound_socket.has_hangup() and sw.get_elapsed() < timeout):
-            f = outbound_socket.wait_for_action(5)
-        if sw.get_elapsed() >= timeout:
-            outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
-            return None
-    return f
-
-def start_debug_record(outbound_socket):
-    guid = outbound_socket.get_channel_unique_id()
-    outbound_socket.record_file = '/tmp/' + guid + '.wav'
-    outbound_socket.set("RECORD_STEREO=true")
-    outbound_socket.api("uuid_record %s start %s" %  (guid, outbound_socket.record_file))
-
-def stop_debug_record(outbound_socket):
-    outbound_socket.api("uuid_record %s stop %s" %  (outbound_socket.get_channel_unique_id(), outbound_socket.record_file))
 
 class Element(object):
     """Abstract Element Class to be inherited by all other elements"""
@@ -1241,7 +1176,6 @@ class GetDigits(Element):
         outbound_socket.log.info("GetDigits, No Digits Received")
 
 class BreakOnAnsweringMachine(Element):
-
     def __init__(self):
         Element.__init__(self)
         self.nestables = ('GetKeyPresses')
@@ -1356,9 +1290,9 @@ class GetKeyPresses(Element):
             self.no_key = None
 
     def execute(self, outbound_socket):
-        #start_debug_record(outbound_socket)
-        self.play_str = roll_wait_play_speak(outbound_socket.log, \
-            outbound_socket.save_dir, self.children)
+        player = PlaybackTool(outbound_socket)
+        #player.start_debug_record()
+        self.play_str = player.roll_wait_play_speak(self.children)
         outbound_socket.filter('Event-Name DTMF')
         outbound_socket.filter('Event-Name PLAYBACK_STOP')
         outbound_socket.execute('start_dtmf')
@@ -1601,21 +1535,21 @@ class LeaveMessage(Element):
         self.use_avmd = detect_type == 'avmd'
 
     def _build_play_from_children(self, outbound_socket):
-        log = outbound_socket.log
-        save_dir = outbound_socket.save_dir
+        player = PlaybackTool(outbound_socket)
         play_str = []
         for child_instance in self.children:
             outbound_socket.log.debug(str(child_instance))
             if isinstance(child_instance, PlayMany):
-                play_str = play_str + roll_wait_play_speak(log, save_dir, child_instance.children)
+                play_str = play_str + player.roll_wait_play_speak(child_instance.children)
             elif isinstance(child_instance, Play) or isinstance(child_instance, Speak):
-                play_str = play_str + roll_wait_play_speak(log, save_dir, self.children)
+                play_str = play_str + player.roll_wait_play_speak(self.children)
                 break
         return play_str
 
     def execute(self, outbound_socket):
+        player = PlaybackTool(outbound_socket)
         self.play_str = self._build_play_from_children(outbound_socket)
-        #start_debug_record(outbound_socket)
+        #player.start_debug_record(outbound_socket)
         beep_detector = BeepDetector(outbound_socket, self.use_avmd, outbound_socket.get_channel_unique_id())
         beep_detector.beep_event.append(self._beep_handler)
         beep_detector.start()
@@ -1625,13 +1559,12 @@ class LeaveMessage(Element):
 
         # wait for most recent playback, which either just "broke" or is still playing
         # likely don't need this anymore, since we break instead of pausing in the beep detector
-        #playback_wait(outbound_socket)
+        #player.playback_wait()
 
         # if we detected a beep, this is where we leave the message
         # otherwise: play again! why not?
-        outbound_socket.playback("file_string://" +'!'.join(self.play_str))
-        playback_wait(outbound_socket)
-        #stop_debug_record(outbound_socket)
+        player.playback_and_wait("file_string://" +'!'.join(self.play_str))
+        #player.stop_debug_record(outbound_socket)
 
     def _beep_handler(self, state):
         state.outbound_socket.log.info('detected VM tone: ' + state.info.beep_tone_name)
@@ -1804,24 +1737,12 @@ class PlayMany(Element):
         self.nestables = ('Play', 'Speak', 'Wait')
 
     def execute(self, outbound_socket):
+        player = PlaybackTool(outbound_socket)
         play_str = 'file_string://' + '!'.join( \
-            roll_wait_play_speak(outbound_socket.log, \
-            outbound_socket.save_dir, self.children))
+            player.roll_wait_play_speak(self.children))
         outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
         outbound_socket.log.debug("Playing %s" % play_str)
-        res = outbound_socket.playback(play_str)
-        if res.is_success():
-            event = playback_wait(outbound_socket)
-            if event is None:
-                outbound_socket.log.warn("Play Break (empty event)")
-                return
-            outbound_socket.log.debug("Play done (%s)" \
-                    % str(event['Application-Response']))
-        else:
-            outbound_socket.log.error("Play Failed - %s" \
-                            % str(res.get_response()))
-        outbound_socket.log.info("Play Finished")
-        return
+        player.playback_and_wait(play_str)
 
 class Play(Element):
     """Play local audio file or at a URL
@@ -1870,27 +1791,15 @@ class Play(Element):
 
     def execute(self, outbound_socket):
         if self.sound_file_path:
-            outbound_socket.set("playback_sleep_val=0")
+            outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
             if self.loop_times == 1:
                 play_str = self.sound_file_path
             else:
-                outbound_socket.set("playback_delimiter=!")
                 play_str = "file_string://silence_stream://1!"
                 play_str += '!'.join([ self.sound_file_path for x in range(self.loop_times) ])
             outbound_socket.log.debug("Playing %d times" % self.loop_times)
-            res = outbound_socket.playback(play_str)
-            if res.is_success():
-                event = playback_wait(outbound_socket)
-                if event is None:
-                    outbound_socket.log.warn("Play Break (empty event)")
-                    return
-                outbound_socket.log.debug("Play done (%s)" \
-                        % str(event['Application-Response']))
-            else:
-                outbound_socket.log.error("Play Failed - %s" \
-                                % str(res.get_response()))
-            outbound_socket.log.info("Play Finished")
-            return
+            player = PlaybackTool(outbound_socket)
+            player.playback_and_wait(play_str)
         else:
             outbound_socket.log.error("Invalid Sound File - Ignoring Play")
 
