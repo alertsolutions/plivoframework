@@ -1563,7 +1563,7 @@ class LeaveMessage(Element):
 
         # if we detected a beep, this is where we leave the message
         # otherwise: play again! why not?
-        player.playback_and_wait("file_string://" +'!'.join(self.play_str))
+        player.playback_and_wait(self.play_str)
         #player.stop_debug_record(outbound_socket)
 
     def _beep_handler(self, state):
@@ -1738,11 +1738,10 @@ class PlayMany(Element):
 
     def execute(self, outbound_socket):
         player = PlaybackTool(outbound_socket)
-        play_str = 'file_string://' + '!'.join( \
-            player.roll_wait_play_speak(self.children))
+        play_us = player.roll_wait_play_speak(self.children)
         outbound_socket.execute('multiset', 'playback_sleep_val=0 playback_delimiter=!')
-        outbound_socket.log.debug("Playing %s" % play_str)
-        player.playback_and_wait(play_str)
+        outbound_socket.log.debug("Playing %s" % play_us)
+        player.playback_and_wait(play_us)
 
 class Play(Element):
     """Play local audio file or at a URL
@@ -1799,7 +1798,7 @@ class Play(Element):
                 play_str += '!'.join([ self.sound_file_path for x in range(self.loop_times) ])
             outbound_socket.log.debug("Playing %d times" % self.loop_times)
             player = PlaybackTool(outbound_socket)
-            player.playback_and_wait(play_str)
+            player.playback_and_wait(play_str, self.loop_times)
         else:
             outbound_socket.log.error("Invalid Sound File - Ignoring Play")
 

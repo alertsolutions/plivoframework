@@ -15,6 +15,7 @@ from plivo.rest.freeswitch.helpers import Stopwatch
 class PlaybackTool:
     def __init__(self, outbound_socket):
         self.outbound_socket = outbound_socket
+        self.play_count = 1
 
     def roll_wait_play_speak(self, children):
         play_str = []
@@ -61,11 +62,23 @@ class PlaybackTool:
 
         return play_str
 
-    def playback_and_wait(self, play_str):
+    def __validate_play(self, play_us, count):
+        if isinstance(play_us, basestring):
+            return (play_us, count)
+
+        if isinstance(play_us, list):
+            return ('file_string://' + '!'.join(play_us), len(play_us))
+
+        raise Exception('play argument must be list or string')
+
+    def playback_and_wait(self, play_us, count=1):
+        play_info = self.__validate_play(play_us, count)
+        play_str = play_info[0]
+        play_count = play_info[1]
         self.outbound_socket.filter('Event-Name PLAYBACK_STOP')
         res = self.outbound_socket.playback(play_str)
         if res.is_success():
-            event = self.playback_wait()
+            event = self.playback_wait(play_count)
             if event is None:
                 self.outbound_socket.log.warn("Play Break (empty event)")
                 return
@@ -78,23 +91,27 @@ class PlaybackTool:
         self.outbound_socket.filter_delete('Event-Name PLAYBACK_STOP')
         return
 
-    def playback_wait(self, on_execute=False, timeout=300):
+    def playback_wait(self, count=1, on_execute=False, timeout=300):
+        self.play_count = count
         with Stopwatch() as sw:
             f = self.outbound_socket.wait_for_action(5)
-            while self._continue_playback(f, on_execute):
+            while self.__continue_playback(f, on_execute):
                 f = self.outbound_socket.wait_for_action(5)
                 if sw.get_elapsed() >= timeout:
                     self.outbound_socket.log.warn('%s sec. timeout waiting for playback to complete' % sw.get_elapsed())
                     return None
             return f
 
-    def _continue_playback(self, event, on_execute):
+    def __continue_playback(self, event, on_execute):
         valid_stop = False
         if on_execute:
             valid_stop = event['Application'] is None or event['Application'] != 'playback'
-        else:
-            valid_stop = event['Event-Name'] == 'PLAYBACK_STOP' 
-        self.outbound_socket.log.debug('on_execute: %s valid_stop: %s' % (str(on_execute), str(valid_stop)))
+        elif event['Event-Name'] == 'PLAYBACK_STOP':
+            self.play_count = self.play_count - 1
+            valid_stop = self.play_count == 0
+            #self.outbound_socket.log.debug('count %d => %d' % (self.play_count + 1, self.play_count))
+            
+        #self.outbound_socket.log.debug('on_execute: %s valid_stop: %s' % (str(on_execute), str(valid_stop)))
         return not valid_stop and not self.outbound_socket.has_hangup()
 
     def start_debug_record(self):
