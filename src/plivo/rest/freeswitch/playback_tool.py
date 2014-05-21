@@ -19,11 +19,8 @@ class PlaybackTool:
 
     def roll_wait_play_speak(self, children):
         play_str = []
-        first = True
         for child_instance in children:
             self.outbound_socket.log.debug('rolling %s ' % child_instance.name)
-            if first:
-                play_str.append('silence_stream://1')
             if child_instance.name == 'Wait':
                 play_str.append('silence_stream://%d' % (child_instance.length * 1000))
             if child_instance.name == 'Play':
@@ -57,7 +54,6 @@ class PlaybackTool:
                     continue
                 for x in range(loop):
                     play_str.append(sound_file)
-            first = False
             #self.outbound_socket.log.debug('play_str: %s' % play_str)
 
         return play_str

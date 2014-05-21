@@ -239,6 +239,8 @@ class PlivoOutboundEventSocket(OutboundEventSocket):
         if self.current_element == 'GetKeyPresses' \
             or self.current_element == 'Play' \
             or self.current_element == 'PlayMany' \
+            or self.current_element == 'Wait' \
+            or self.current_element == 'LeaveMessage' \
             or self.beep_detector is not None:
             self._action_queue.put(event)
 
