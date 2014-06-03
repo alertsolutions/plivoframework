@@ -173,6 +173,11 @@ ELEMENTS_DEFAULT_PARAMS = {
 
 MAX_LOOPS = 10000
 
+# DTO class
+class Result:
+    def __init__(self, **kwargs):
+        self.__dict__ = kwargs
+
 class Element(object):
     """Abstract Element Class to be inherited by all other elements"""
 
@@ -684,7 +689,48 @@ class Dial(Element):
             raise RESTAttributeException("callbackMethod must be 'GET' or 'POST'")
         self.digits_match = self.extract_attribute_value("digitsMatch")
 
-    def _prepare_play_string(self, outbound_socket, remote_url):
+    def execute(self, outbound_socket):
+        sched_hangup_id = str(uuid.uuid1())
+        self.__set_channel_variables(outbound_socket)
+
+        numbers = self.__get_numbers(outbound_socket)
+        if not numbers:
+            outbound_socket.log.error("Dial Aborted, No Number to dial !")
+            return
+
+        self.dial_str = self.__create_dial_string(outbound_socket, numbers, sched_hangup_id)
+
+        self.__play_ringback(outbound_socket)
+
+        hangup_cause = 'NORMAL_CLEARING'
+        outbound_socket.log.info("Dial Started %s" % self.dial_str)
+        reason = None
+        try:
+            outbound_socket.execute('flush_dtmf')
+            outbound_socket.ring_ready()
+
+            if self.digits_match and self.callback_url:
+                self.__set_bind_digit_actions()
+
+            # outbound_socket.api("log notice bridge %s" % self.dial_str)
+            outbound_socket.bridge(self.dial_str, lock=False)
+
+            event = self.__wait_for_completion(outbound_socket)
+            outbound_socket.log.info("Dial completed %s" % event['Event-Name'])
+
+            reason = self.__get_reason(event, outbound_socket)
+
+            outbound_socket.bgapi("sched_del %s" % sched_hangup_id)
+        except Exception, e:
+            outbound_socket.log.warn('Error processing transfer result (%s): %s' \
+                                      % (e.__class__.__name__, str(e)))
+        finally:
+            outbound_socket.log.info("Dial Finished with reason: %s" \
+                                     % reason.reason)
+            if self.action and is_valid_url(self.action):
+                self.__redirect(outbound_socket, reason)
+
+    def __prepare_play_string(self, outbound_socket, remote_url):
         sound_files = []
         if not remote_url:
             return sound_files
@@ -702,67 +748,67 @@ class Dial(Element):
         try:
             response = outbound_socket.send_to_url(remote_url, params={}, method='POST')
             doc = etree.fromstring(response)
-            if doc.tag != 'Response':
-                outbound_socket.log.warn('No Response Tag Present')
-                return sound_files
-
-            # build play string from remote restxml
-            for element in doc:
-                # Play element
-                if element.tag == 'Play':
-                    child_instance = Play()
-                    child_instance.parse_element(element)
-                    child_instance.prepare(outbound_socket)
-                    sound_file = child_instance.sound_file_path
-                    if sound_file:
-                        sound_file = get_resource(outbound_socket, sound_file)
-                        loop = child_instance.loop_times
-                        if loop == 0:
-                            loop = MAX_LOOPS  # Add a high number to Play infinitely
-                        # Play the file loop number of times
-                        for i in range(loop):
-                            sound_files.append(sound_file)
-                        # Infinite Loop, so ignore other children
-                        if loop == MAX_LOOPS:
-                            break
-                # Speak element
-                elif element.tag == 'Speak':
-                    child_instance = Speak()
-                    child_instance.parse_element(element)
-                    text = child_instance.text
-                    # escape simple quote
-                    text = text.replace("'", "\\'")
-                    loop = child_instance.loop_times
-                    child_type = child_instance.item_type
-                    method = child_instance.method
-                    say_str = ''
-                    if child_type and method:
-                        language = child_instance.language
-                        say_args = "%s.wav %s %s %s '%s'" \
-                                        % (language, language, child_type, method, text)
-                        say_str = "${say_string %s}" % say_args
-                    else:
-                        engine = child_instance.engine
-                        voice = child_instance.voice
-                        say_str = "say:%s:%s:'%s'" % (engine, voice, text)
-                    if not say_str:
-                        continue
-                    for i in range(loop):
-                        sound_files.append(say_str)
-                # Wait element
-                elif element.tag == 'Wait':
-                    child_instance = Wait()
-                    child_instance.parse_element(element)
-                    pause_secs = child_instance.length
-                    pause_str = 'file_string://silence_stream://%s' % (pause_secs * 1000)
-                    sound_files.append(pause_str)
+            sound_files = self.__parse_xml(doc)
         except Exception, e:
             outbound_socket.log.warn('Fetching remote sound from restxml failed: %s' % str(e))
         finally:
             outbound_socket.log.info('Fetching remote sound from restxml done for %s' % remote_url)
             return sound_files
 
-    def create_number(self, number_instance, outbound_socket):
+    def __parse_xml(self, doc):
+        if doc.tag != 'Response':
+            outbound_socket.log.warn('No Response Tag Present')
+            return sound_files
+
+        # build play string from remote restxml
+        for element in doc:
+            if element.tag == 'Play':
+                child_instance = Play()
+                child_instance.parse_element(element)
+                child_instance.prepare(outbound_socket)
+                sound_file = child_instance.sound_file_path
+                if sound_file:
+                    sound_file = get_resource(outbound_socket, sound_file)
+                    loop = child_instance.loop_times
+                    if loop == 0:
+                        loop = MAX_LOOPS  # Add a high number to Play infinitely
+                    # Play the file loop number of times
+                    for i in range(loop):
+                        sound_files.append(sound_file)
+                    # Infinite Loop, so ignore other children
+                    if loop == MAX_LOOPS:
+                        break
+            elif element.tag == 'Speak':
+                child_instance = Speak()
+                child_instance.parse_element(element)
+                text = child_instance.text
+                # escape simple quote
+                text = text.replace("'", "\\'")
+                loop = child_instance.loop_times
+                child_type = child_instance.item_type
+                method = child_instance.method
+                say_str = ''
+                if child_type and method:
+                    language = child_instance.language
+                    say_args = "%s.wav %s %s %s '%s'" \
+                                    % (language, language, child_type, method, text)
+                    say_str = "${say_string %s}" % say_args
+                else:
+                    engine = child_instance.engine
+                    voice = child_instance.voice
+                    say_str = "say:%s:%s:'%s'" % (engine, voice, text)
+                if not say_str:
+                    continue
+                for i in range(loop):
+                    sound_files.append(say_str)
+            elif element.tag == 'Wait':
+                child_instance = Wait()
+                child_instance.parse_element(element)
+                pause_secs = child_instance.length
+                pause_str = 'file_string://silence_stream://%s' % (pause_secs * 1000)
+                sound_files.append(pause_str)
+
+    def __create_number(self, number_instance, outbound_socket):
         num_gw = []
         # skip number object without gateway or number
         if not number_instance.gateways:
@@ -822,8 +868,70 @@ class Dial(Element):
         result = '|'.join(num_gw)
         return result
 
-    def execute(self, outbound_socket):
+    def __wait_for_completion(self, outbound_socket):
+        event = None
+        while not outbound_socket.has_hangup() and \
+            (event is None or event['Application'] == 'playback'):
+            event = outbound_socket.wait_for_action()
+
+        if event['Event-Name'] == 'CHANNEL_UNBRIDGE' \
+            or (event is None and outbound_socket.has_hangup()):
+            event = outbound_socket.wait_for_action()
+
+        return event
+
+    def __get_numbers(self, outbound_socket):
+        # Set numbers to dial from Number nouns
         numbers = []
+        for child in self.children:
+            if isinstance(child, Number):
+                dial_num = self.__create_number(child, outbound_socket)
+                if not dial_num:
+                    continue
+                numbers.append(dial_num)
+        return numbers
+
+    def __create_dial_string(self, outbound_socket, numbers, sched_hangup_id):
+        dial_str = ':_:'.join(numbers)
+
+        # Set ring flag if dial will ring.
+        # But first set plivo_dial_rang to false
+        # to be sure we don't get it from an old Dial
+        outbound_socket.set("plivo_dial_rang=false")
+        ring_flag = "api_on_ring='uuid_setvar %s plivo_dial_rang true',api_on_pre_answer='uuid_setvar %s plivo_dial_rang true'" \
+                    % (outbound_socket.get_channel_unique_id(), outbound_socket.get_channel_unique_id())
+
+        # Set time limit: when reached, B Leg is hung up
+        dial_time_limit = "api_on_answer_1='sched_api +%d %s uuid_transfer %s -bleg hangup:ALLOTTED_TIMEOUT inline'" \
+                      % (self.time_limit, sched_hangup_id, outbound_socket.get_channel_unique_id())
+
+        # Set confirm sound and key or unset if not provided
+        dial_confirm = ''
+        if self.confirm_sound:
+            confirm_sounds = self.__prepare_play_string(outbound_socket, self.confirm_sound)
+            if confirm_sounds:
+                play_str = '!'.join(confirm_sounds)
+                play_str = "file_string://silence_stream://1!%s" % play_str
+                # Use confirm key if present else just play music
+                if self.confirm_key:
+                    confirm_music_str = "group_confirm_file=%s" % play_str
+                    confirm_key_str = "group_confirm_key=%s" % self.confirm_key
+                else:
+                    confirm_music_str = "group_confirm_file=playback %s" % play_str
+                    confirm_key_str = "group_confirm_key=exec"
+                # Cancel the leg timeout after the call is answered
+                confirm_cancel = "group_confirm_cancel_timeout=1"
+                dial_confirm = ",%s,%s,%s,playback_delimiter=!" % (confirm_music_str, confirm_key_str, confirm_cancel)
+
+        # Ugly hack to force use of enterprise originate because simple originate lacks speak support in ringback
+        # TODO: this hack breaks bridge for some reason, revisit when we implement speak, I guess
+        #if len(numbers) < 2:
+        #    dial_str += ':_:'
+
+        # Prepend time limit and group confirm to dial string
+        return '<%s,%s%s>%s' % (ring_flag, dial_time_limit, dial_confirm, dial_str)
+
+    def __set_channel_variables(self, outbound_socket):
         # Set timeout
         if self.timeout > 0:
             outbound_socket.set("call_timeout=%d" % self.timeout)
@@ -849,65 +957,16 @@ class Dial(Element):
         # Don't hangup after bridge !
         outbound_socket.set("hangup_after_bridge=false")
 
-        # Set ring flag if dial will ring.
-        # But first set plivo_dial_rang to false
-        # to be sure we don't get it from an old Dial
-        outbound_socket.set("plivo_dial_rang=false")
-        ring_flag = "api_on_ring='uuid_setvar %s plivo_dial_rang true',api_on_pre_answer='uuid_setvar %s plivo_dial_rang true'" \
-                    % (outbound_socket.get_channel_unique_id(), outbound_socket.get_channel_unique_id())
-
-        # Set numbers to dial from Number nouns
-        for child in self.children:
-            if isinstance(child, Number):
-                dial_num = self.create_number(child, outbound_socket)
-                if not dial_num:
-                    continue
-                numbers.append(dial_num)
-        if not numbers:
-            outbound_socket.log.error("Dial Aborted, No Number to dial !")
-            return
-        # Create dialstring
-        self.dial_str = ':_:'.join(numbers)
-
-        # Set time limit: when reached, B Leg is hung up
-        sched_hangup_id = str(uuid.uuid1())
-        dial_time_limit = "api_on_answer_1='sched_api +%d %s uuid_transfer %s -bleg hangup:ALLOTTED_TIMEOUT inline'" \
-                      % (self.time_limit, sched_hangup_id, outbound_socket.get_channel_unique_id())
-
-        # Set confirm sound and key or unset if not provided
-        dial_confirm = ''
-        if self.confirm_sound:
-            confirm_sounds = self._prepare_play_string(outbound_socket, self.confirm_sound)
-            if confirm_sounds:
-                play_str = '!'.join(confirm_sounds)
-                play_str = "file_string://silence_stream://1!%s" % play_str
-                # Use confirm key if present else just play music
-                if self.confirm_key:
-                    confirm_music_str = "group_confirm_file=%s" % play_str
-                    confirm_key_str = "group_confirm_key=%s" % self.confirm_key
-                else:
-                    confirm_music_str = "group_confirm_file=playback %s" % play_str
-                    confirm_key_str = "group_confirm_key=exec"
-                # Cancel the leg timeout after the call is answered
-                confirm_cancel = "group_confirm_cancel_timeout=1"
-                dial_confirm = ",%s,%s,%s,playback_delimiter=!" % (confirm_music_str, confirm_key_str, confirm_cancel)
-
-        # Append time limit and group confirm to dial string
-        self.dial_str = '<%s,%s%s>%s' % (ring_flag, dial_time_limit, dial_confirm, self.dial_str)
-        # Ugly hack to force use of enterprise originate because simple originate lacks speak support in ringback
-        # TODO: this hack breaks bridge for some reason, revisit when we implement speak, I guess
-        # if len(numbers) < 2: self.dial_str += ':_:'
-
         # Set hangup on '*' or unset if not provided
         if self.hangup_on_star:
             outbound_socket.set("bridge_terminate_key=*")
         else:
             outbound_socket.unset("bridge_terminate_key")
 
-        # Play Dial music or bridge the early media accordingly
+    def __play_ringback(self, outbound_socket):
         ringbacks = ''
         if self.dial_music and self.dial_music != "none":
-            ringbacks = self._prepare_play_string(outbound_socket, self.dial_music)
+            ringbacks = self.__prepare_play_string(outbound_socket, self.dial_music)
             if ringbacks:
                 outbound_socket.set("playback_delimiter=!")
                 play_str = '!'.join(ringbacks)
@@ -926,87 +985,61 @@ class Dial(Element):
             outbound_socket.unset("instant_ringback")
             outbound_socket.unset("ringback")
 
-        # Start dial
-        bleg_uuid = ''
-        dial_rang = ''
-        digit_realm = ''
-        hangup_cause = 'NORMAL_CLEARING'
-        outbound_socket.log.info("Dial Started %s" % self.dial_str)
-        try:
-            # send ring ready to originator
-            outbound_socket.ring_ready()
-            # execute bridge
-            # outbound_socket.api("log notice bridge %s" % self.dial_str)
-            outbound_socket.bridge(self.dial_str, lock=False)
+    def __set_bind_digit_actions(self):
+        # create event template
+        event_template = "Event-Name=CUSTOM,Event-Subclass=plivo::dial,Action=digits-match,Unique-ID=%s,Callback-Url=%s,Callback-Method=%s" \
+            % (outbound_socket.get_channel_unique_id(), self.callback_url, self.callback_method)
+        digit_realm = "plivo_bda_dial_%s" % outbound_socket.get_channel_unique_id()
+        # for each digits match, set digit binding action
+        for dmatch in self.digits_match.split(','):
+            dmatch = dmatch.strip()
+            if dmatch:
+                raw_event = "%s,Digits-Match=%s" % (event_template, dmatch)
+                cmd = "%s,%s,exec:event,'%s'" % (digit_realm, dmatch, raw_event)
+                outbound_socket.bind_digit_action(cmd)
+        outbound_socket.digit_action_set_realm(digit_realm)
 
-            # set bind digit actions
-            if self.digits_match and self.callback_url:
-                # create event template
-                event_template = "Event-Name=CUSTOM,Event-Subclass=plivo::dial,Action=digits-match,Unique-ID=%s,Callback-Url=%s,Callback-Method=%s" \
-                    % (outbound_socket.get_channel_unique_id(), self.callback_url, self.callback_method)
-                digit_realm = "plivo_bda_dial_%s" % outbound_socket.get_channel_unique_id()
-                # for each digits match, set digit binding action
-                for dmatch in self.digits_match.split(','):
-                    dmatch = dmatch.strip()
-                    if dmatch:
-                        raw_event = "%s,Digits-Match=%s" % (event_template, dmatch)
-                        cmd = "%s,%s,exec:event,'%s'" % (digit_realm, dmatch, raw_event)
-                        outbound_socket.bind_digit_action(cmd)
-            # set digit realm
-            if digit_realm:
-                outbound_socket.digit_action_set_realm(digit_realm)
+    def __redirect(self, outbound_socket, reason):
+        params = {}
+        # Get ring status
+        dial_rang = outbound_socket.get_var("plivo_dial_rang") == 'true'
+        if dial_rang:
+            params['DialRingStatus'] = 'true'
+        else:
+            params['DialRingStatus'] = 'false'
+        params['DialHangupCause'] = reason.hangup_cause
+        params['DialALegUUID'] = outbound_socket.get_channel_unique_id()
+        params['DialBLegUUID'] = reason.bleg_uuid or ''
+        if self.redirect:
+            self.fetch_rest_xml(self.action, params, method=self.method)
+        else:
+            spawn_raw(outbound_socket.send_to_url, self.action, params, method=self.method)
 
-            # waiting event
-            event = outbound_socket.wait_for_action()
-
-            # parse received events
-            if event['Event-Name'] == 'CHANNEL_UNBRIDGE':
-                bleg_uuid = event['variable_bridge_uuid'] or ''
-                event = outbound_socket.wait_for_action()
-            reason = None
-            originate_disposition = event['variable_originate_disposition']
-            hangup_cause = originate_disposition
-            if hangup_cause == 'ORIGINATOR_CANCEL':
-                reason = '%s (A leg)' % hangup_cause
-            else:
+    def __get_reason(self, event, outbound_socket):
+        reason = None
+        hangup_cause = event['variable_originate_disposition']
+        if hangup_cause == 'ORIGINATOR_CANCEL':
+            reason = '%s (A leg)' % hangup_cause
+        else:
+            reason = '%s (B leg)' % hangup_cause
+        if not hangup_cause or hangup_cause == 'SUCCESS':
+            hangup_cause = outbound_socket.get_hangup_cause()
+            reason = '%s (A leg)' % hangup_cause
+            if not hangup_cause:
+                hangup_cause = event['variable_bridge_hangup_cause']
                 reason = '%s (B leg)' % hangup_cause
-            if not hangup_cause or hangup_cause == 'SUCCESS':
-                hangup_cause = outbound_socket.get_hangup_cause()
-                reason = '%s (A leg)' % hangup_cause
                 if not hangup_cause:
-                    hangup_cause = outbound_socket.get_var('bridge_hangup_cause')
-                    reason = '%s (B leg)' % hangup_cause
+                    hangup_cause = event['variable_hangup_cause']
+                    reason = '%s (A leg)' % hangup_cause
                     if not hangup_cause:
-                        hangup_cause = outbound_socket.get_var('hangup_cause')
+                        hangup_cause = 'NORMAL_CLEARING'
                         reason = '%s (A leg)' % hangup_cause
-                        if not hangup_cause:
-                            hangup_cause = 'NORMAL_CLEARING'
-                            reason = '%s (A leg)' % hangup_cause
-            outbound_socket.log.info("Dial Finished with reason: %s" \
-                                     % reason)
-            # Unschedule hangup task
-            outbound_socket.bgapi("sched_del %s" % sched_hangup_id)
-            # Get ring status
-            dial_rang = outbound_socket.get_var("plivo_dial_rang") == 'true'
-        finally:
-            # If action is set, redirect to this url
-            # Otherwise, continue to next Element
-            if self.action and is_valid_url(self.action):
-                params = {}
-                if dial_rang:
-                    params['DialRingStatus'] = 'true'
-                else:
-                    params['DialRingStatus'] = 'false'
-                params['DialHangupCause'] = hangup_cause
-                params['DialALegUUID'] = outbound_socket.get_channel_unique_id()
-                if bleg_uuid:
-                    params['DialBLegUUID'] = bleg_uuid
-                else:
-                    params['DialBLegUUID'] = ''
-                if self.redirect:
-                    self.fetch_rest_xml(self.action, params, method=self.method)
-                else:
-                    spawn_raw(outbound_socket.send_to_url, self.action, params, method=self.method)
+
+        bleg_uuid = ''
+        if event['Event-Name'] == 'CHANNEL_UNBRIDGE':
+            bleg_uuid = event['variable_bridge_uuid'] or ''
+
+        return Result(hangup_cause = hangup_cause, reason = reason, bleg_uuid = bleg_uuid)
 
 class GetDigits(Element):
     """Get digits from the caller's keypad
