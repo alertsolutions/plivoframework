@@ -5,9 +5,9 @@
 # Copyright (c) 2011 Plivo Team. See LICENSE for details.
 
 
-FS_CONF_PATH=https://github.com/alertsolutions/plivoframework/raw/master/freeswitch
-FS_GIT_REPO=git://git.freeswitch.org/freeswitch.git
-FS_INSTALLED_PATH=/usr/local/freeswitch
+FS_CONF_PATH='https://github.com/alertsolutions/plivoframework/raw/master/freeswitch'
+FS_GIT_REPO='https://stash.freeswitch.org/scm/fs/freeswitch.git'
+FS_INSTALLED_PATH='/usr/local/freeswitch'
 
 #####################################################
 FS_BASE_PATH=/usr/local/src/
@@ -105,7 +105,7 @@ if [ "$rev" != "x" ] ; then
     git reset --hard $rev
 fi
 [ $(uname -m) == "x86_64" ] && enable_64='--enable-64' || enable_64=''
-sh bootstrap.sh && ./configure --prefix=$FS_INSTALLED_PATH $enable_64
+sh bootstrap.sh -j && ./configure --prefix=$FS_INSTALLED_PATH $enable_64
 [ -f modules.conf ] && cp modules.conf modules.conf.bak
 sed -i \
 -e "s/applications\/mod_sms/#&/g" \
@@ -137,7 +137,7 @@ else
     -e "s/#\(say\/mod_say_th\)/\1/g" \
     modules.conf
 fi
-make && make install && make sounds-install && make moh-install
+make && make install cd-sounds-install cd-moh-install
 
 # Enable FreeSWITCH modules
 cd $FS_INSTALLED_PATH/conf/autoload_configs/
